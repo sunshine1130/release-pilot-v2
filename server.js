@@ -108,19 +108,39 @@ function normalizeGitError(err) {
 }
 
 /**
- * 执行 meegle CLI。
+ * 定位 meegle CLI 的真实入口脚本。
  *
- * Windows 上真实可执行是 meegle.cmd，直接 spawn('meegle') 会 ENOENT；
- * CLI 的错误信息走 stderr，必须两个流都收，否则排障时只能看到「退出码非 0」。
+ * 不能直接 spawn meegle.cmd：Windows 上执行 .cmd 必须过 cmd.exe，而 cmd 会把
+ * 参数里的 % 当变量展开。MQL 里 LIKE '%xxx%' 和反引号都常出现，一过 shell 就被改坏。
+ * 这里改为用 node 直接跑 CLI 的入口 js，参数原样传递。
  */
-async function runMeegle(args, timeoutMs = 60000) {
-  const bin = process.platform === 'win32' ? 'meegle.cmd' : 'meegle'
+function resolveMeegleEntry() {
+  const candidates = [
+    process.env.MEEGLE_JS,
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'npm/node_modules/@lark-project/meegle/bin/meegle.js') : null,
+    'C:/Program Files/nodejs/node_global/node_modules/@lark-project/meegle/bin/meegle.js',
+  ].filter(Boolean)
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c
+    } catch {}
+  }
+  return null
+}
+
+/** 执行 meegle CLI；拿不到入口脚本时退回 .cmd（能用但有 shell 转义风险，仅作兜底） */
+async function runMeegle(args, timeoutMs = 90000) {
+  const entry = resolveMeegleEntry()
+  const [bin, argv] = entry
+    ? [process.execPath, [entry, ...args]]
+    : [process.platform === 'win32' ? 'meegle.cmd' : 'meegle', args]
+
   try {
-    const { stdout } = await execFileAsync(bin, args, {
+    const { stdout } = await execFileAsync(bin, argv, {
       timeout: timeoutMs,
       maxBuffer: GIT_MAX_BUFFER,
       windowsHide: true,
-      shell: process.platform === 'win32', // .cmd 需要 shell 才能启动
+      shell: !entry && process.platform === 'win32',
     })
     return stdout
   } catch (err) {
@@ -133,6 +153,208 @@ async function runMeegle(args, timeoutMs = 60000) {
     const stderr = String(err.stderr || err.message || '')
     throw { code: 'MEEGLE_QUERY_FAILED', message: stderr.trim().split('\n')[0] || 'meegle 调用失败' }
   }
+}
+
+// ===== 飞书项目（Meegle） =====
+
+/** CLI 输出可能夹带日志前缀，截到第一个 { 或 [ 再解析 */
+function safeJsonParse(text) {
+  const s = String(text)
+  const i = s.search(/[[{]/)
+  if (i < 0) return null
+  try {
+    return JSON.parse(s.slice(i))
+  } catch {
+    return null
+  }
+}
+
+async function meegleJson(args) {
+  const out = await runMeegle([...args, '--format', 'json'])
+  const data = safeJsonParse(out)
+  if (data === null) throw { code: 'MEEGLE_QUERY_FAILED', message: '飞书项目返回内容无法解析为 JSON' }
+  // CLI 把业务失败也包在 200 里，必须看 err_msg / error 字段
+  const msg = data.err_msg || data.error || (data.data && data.data.err_msg)
+  if (msg) throw { code: 'MEEGLE_QUERY_FAILED', message: String(msg) }
+  return data
+}
+
+async function meegleStatus() {
+  const data = await meegleJson(['auth', 'status'])
+  return data
+}
+
+async function meegleSpaces() {
+  const data = await meegleJson(['project', 'search'])
+  const list = (data.data && data.data.projects) || data.projects || []
+  return list.map(p => ({ projectKey: p.project_key, simpleName: p.simple_name, name: p.name }))
+}
+
+async function meegleTypes(projectKey) {
+  const data = await meegleJson(['workitem', 'meta-types', '--project-key', projectKey])
+  const list = (data.data && data.data.list) || data.list || []
+  return list.map(t => ({ apiName: t.api_name, typeKey: t.type_key, name: t.name, disabled: t.is_disable === 1 }))
+}
+
+/** 从 moql_field_list 里取字段值：结构是 { value_type, value: { string_value | long_value | key_label_value_list } } */
+function readMoqlField(fieldList, key) {
+  const f = (fieldList || []).find(x => x.key === key)
+  if (!f || !f.value) return null
+  const v = f.value
+  if (v.string_value !== undefined) return v.string_value
+  if (v.long_value !== undefined) return v.long_value
+  if (v.key_label_value_list) return v.key_label_value_list.map(x => x.label).filter(Boolean).join(' / ')
+  return null
+}
+
+async function meegleQueryPage({ projectKey, mql, sessionId, groupId, pageNum }) {
+  if (mql) {
+    return meegleJson(['workitem', 'query', '--project-key', projectKey, '--mql', mql])
+  }
+  // 翻页时不能再传 --mql，否则服务端会当成新查询重跑、翻页参数被忽略
+  return meegleJson([
+    'workitem', 'query',
+    '--project-key', projectKey,
+    '--session-id', sessionId,
+    '--group-pagination-list', JSON.stringify([{ group_id: groupId, page_num: pageNum }]),
+  ])
+}
+
+/**
+ * 跨多个工作项类型拉需求。
+ *
+ * 为什么要跨类型：一个空间里「需求管理」类工作项是**按业务域拆成独立表**的
+ * （实测 ly_oms 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 个），
+ * 只查其中一张会静默漏掉其他域的全部需求 —— 而这正是发版要收集的东西。
+ */
+async function meegleQueryAll({ projectKey, simpleName, types, mqlTemplate, maxPerType }) {
+  const items = []
+  const perType = []
+  const errors = []
+  const pageSize = 50
+
+  for (const t of types) {
+    const mql = String(mqlTemplate)
+      .replace(/\{space\}/g, simpleName)
+      .replace(/\{type\}/g, t.typeKey)
+    try {
+      const first = await meegleQueryPage({ projectKey, mql })
+      const groups = (first.list && first.list[0] && first.list[0].group_infos) || [{ group_id: '1' }]
+      const groupId = groups[0] && groups[0].group_id ? groups[0].group_id : '1'
+      const count = (first.list && first.list[0] && first.list[0].count) || 0
+      const sessionId = first.session_id
+
+      let fetched = 0
+      const collect = page => {
+        const data = page.data || {}
+        for (const key of Object.keys(data)) {
+          for (const row of data[key] || []) {
+            const workItemId = readMoqlField(row.moql_field_list, 'work_item_id')
+            if (workItemId === null) continue
+            items.push({
+              workItemId: String(workItemId),
+              name: readMoqlField(row.moql_field_list, 'name') || '',
+              status: readMoqlField(row.moql_field_list, 'work_item_status') || '',
+              workItemType: t.apiName,
+              workItemTypeName: t.name,
+              link: `https://project.feishu.cn/${simpleName}/${t.apiName}/detail/${workItemId}`,
+            })
+            fetched++
+          }
+        }
+      }
+      collect(first)
+
+      const maxPages = Math.min(Math.ceil(count / pageSize), Math.ceil(maxPerType / pageSize))
+      for (let page = 2; page <= maxPages && fetched < maxPerType; page++) {
+        const next = await meegleQueryPage({ projectKey, sessionId, groupId, pageNum: page })
+        const before = fetched
+        collect(next)
+        if (fetched === before) break // 拿不到新数据就停，避免无意义翻页
+      }
+
+      perType.push({ apiName: t.apiName, name: t.name, count, fetched })
+    } catch (e) {
+      // 单个类型失败不影响其他类型：某个域没权限时不该让整次同步全废
+      errors.push({ apiName: t.apiName, name: t.name, message: e.message || String(e) })
+    }
+  }
+
+  return { items, perType, errors }
+}
+
+async function handleMeegleStatus(req, res) {
+  try {
+    json(res, await meegleStatus())
+  } catch (err) {
+    fail(res, err.code || 'MEEGLE_QUERY_FAILED', err.message || '无法获取飞书项目登录状态', 500)
+  }
+}
+
+async function handleMeegleSpaces(req, res) {
+  try {
+    json(res, { spaces: await meegleSpaces() })
+  } catch (err) {
+    fail(res, err.code || 'MEEGLE_QUERY_FAILED', err.message || '无法获取飞书项目空间列表', 500)
+  }
+}
+
+async function handleMeegleTypes(req, res, query) {
+  const projectKey = query.get('projectKey')
+  if (!projectKey) return fail(res, 'BAD_REQUEST', '缺少 projectKey 参数')
+  try {
+    json(res, { types: await meegleTypes(projectKey) })
+  } catch (err) {
+    fail(res, err.code || 'MEEGLE_QUERY_FAILED', err.message || '无法获取工作项类型', 500)
+  }
+}
+
+async function handleMeegleQuery(req, res) {
+  const body = await readJsonBody(req)
+  const { projectKey, simpleName, types, mqlTemplate, maxPerType } = body || {}
+  if (!projectKey) return fail(res, 'BAD_REQUEST', '缺少 projectKey')
+  if (!Array.isArray(types) || !types.length) return fail(res, 'BAD_REQUEST', '至少选择一种工作项类型')
+  if (!mqlTemplate || !/\{type\}/.test(mqlTemplate)) {
+    return fail(res, 'BAD_REQUEST', 'MQL 模板必须包含 {space} 与 {type} 占位符')
+  }
+  try {
+    const result = await meegleQueryAll({
+      projectKey,
+      simpleName: simpleName || projectKey,
+      types,
+      mqlTemplate,
+      maxPerType: Number(maxPerType) > 0 ? Number(maxPerType) : 200,
+    })
+    json(res, result)
+  } catch (err) {
+    fail(res, err.code || 'MEEGLE_QUERY_FAILED', err.message || '拉取飞书需求失败', 500)
+  }
+}
+
+/** 读取 POST body；限制大小防止异常请求把内存打满 */
+function readJsonBody(req, limitBytes = 1024 * 1024) {
+  return new Promise(resolve => {
+    let raw = ''
+    let size = 0
+    req.on('data', chunk => {
+      size += chunk.length
+      if (size > limitBytes) {
+        resolve(null)
+        req.destroy()
+        return
+      }
+      raw += chunk
+    })
+    req.on('end', () => {
+      if (!raw) return resolve({})
+      try {
+        resolve(JSON.parse(raw))
+      } catch {
+        resolve(null)
+      }
+    })
+    req.on('error', () => resolve(null))
+  })
 }
 
 // ===== 分支过滤与需求ID提取 =====
@@ -485,27 +707,6 @@ async function handleBranchIndex(req, res, query) {
   }
 }
 
-async function handleMeegleStatus(req, res) {
-  try {
-    const out = await runMeegle(['auth', 'status', '--format', 'json'])
-    json(res, safeJsonParse(out) || { authenticated: false, host: null })
-  } catch (err) {
-    fail(res, err.code || 'MEEGLE_QUERY_FAILED', err.message || '无法获取飞书项目登录状态', 500)
-  }
-}
-
-/** CLI 输出可能夹带日志前缀，截到第一个 { 或 [ 再解析 */
-function safeJsonParse(text) {
-  const s = String(text)
-  const i = s.search(/[[{]/)
-  if (i < 0) return null
-  try {
-    return JSON.parse(s.slice(i))
-  } catch {
-    return null
-  }
-}
-
 // ===== 路由表 =====
 
 const ROUTES = {
@@ -514,6 +715,9 @@ const ROUTES = {
   'GET /api/git/branches': handleRemoteBranches,
   'GET /api/git/branch-index': handleBranchIndex,
   'GET /api/meegle/status': handleMeegleStatus,
+  'GET /api/meegle/spaces': handleMeegleSpaces,
+  'GET /api/meegle/types': handleMeegleTypes,
+  'POST /api/meegle/query': handleMeegleQuery,
 }
 
 const MIME_TYPES = {

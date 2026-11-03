@@ -37,6 +37,8 @@
       <label class="btn btn-outline btn-sm" style="cursor:pointer">导入 <input type="file" accept=".json" style="display:none" @change="importFromFile" /></label>
       <button class="btn btn-warning btn-sm" @click="fetchAllBranches">获取分支</button>
       <button class="btn btn-info btn-sm" :disabled="indexBusy" @click="refreshBranchIndex(true)">{{indexBusy?'刷新中...':'刷新分支索引'}}</button>
+      <button class="btn btn-purple btn-sm" @click="openSyncDialog">同步飞书项目</button>
+      <button class="btn btn-outline btn-sm" @click="openSyncSettings">同步设置</button>
       <button class="btn btn-primary" @click="startAdding">+ 新增需求</button>
     </div>
   </div>
@@ -432,6 +434,108 @@
   <div v-if="projDropdown.filtered.length" v-for="item in projDropdown.filtered" :key="item.name" class="project-dropdown-item" :class="{selected:item.selected}" @click="selectProjDropdown(item)">{{item.name}}</div>
   <div v-else class="project-dropdown-item" style="color:var(--text-muted)">无匹配项目</div>
 </div>
+<!-- v2: 同步设置 -->
+<div class="dialog-overlay" :style="{display:syncSettings.visible?'flex':'none'}" @click.self="syncSettings.visible=false">
+  <div class="sync-box">
+    <div class="sync-header">
+      <span>飞书项目同步设置</span>
+      <button class="btn-close" @click="syncSettings.visible=false">&times;</button>
+    </div>
+    <div class="sync-body">
+      <div v-if="syncSettings.error" class="sync-error">{{syncSettings.error}}</div>
+      <div class="sync-field">
+        <label>空间</label>
+        <select :value="meegleConfig.projectKey" @change="selectSpace($event.target.value)" class="sync-input" style="width:260px">
+          <option v-for="s in syncSettings.spaces" :key="s.projectKey" :value="s.projectKey">{{s.name}}（{{s.simpleName}}）</option>
+        </select>
+      </div>
+      <div class="sync-field">
+        <label>工作项类型<small>可多选 —— 一个空间里需求按业务域拆成多张表，只选一张会漏掉其他域</small></label>
+        <div class="sync-types">
+          <label v-for="t in syncSettings.types" :key="t.apiName" class="sync-type-item" :class="{disabled:t.disabled}">
+            <input type="checkbox" :checked="meegleConfig.typeApiNames.includes(t.apiName)" :disabled="t.disabled" @change="toggleType(t.apiName)">
+            {{t.name}}
+          </label>
+        </div>
+      </div>
+      <div class="sync-field">
+        <label>MQL 模板<small>{space} 与 {type} 会被自动替换</small></label>
+        <textarea v-model="meegleConfig.mqlTemplate" class="sync-input sync-mql" rows="3"></textarea>
+      </div>
+      <div class="sync-field">
+        <label>每个类型最多拉取</label>
+        <input v-model.number="meegleConfig.maxPerType" type="number" min="50" step="50" class="sync-input" style="width:120px">
+      </div>
+    </div>
+    <div class="sync-footer">
+      <span class="sync-hint" v-if="syncSettings.loading">加载中...</span>
+      <span class="sync-hint" v-else>已选 {{meegleConfig.typeApiNames.length}} 个类型</span>
+      <button class="btn btn-outline btn-sm" @click="syncSettings.visible=false">关闭</button>
+      <button class="btn btn-purple btn-sm" @click="saveSyncSettings">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- v2: 同步预览 -->
+<div class="dialog-overlay" :style="{display:syncDialog.visible?'flex':'none'}" @click.self="syncDialog.visible=false">
+  <div class="sync-box sync-box-wide">
+    <div class="sync-header">
+      <span>飞书需求同步预览</span>
+      <button class="btn-close" @click="syncDialog.visible=false">&times;</button>
+    </div>
+    <div class="sync-body">
+      <div v-if="syncDialog.loading" class="sync-hint" style="padding:24px;text-align:center">正在拉取飞书需求...</div>
+      <div v-else-if="syncDialog.error" class="sync-error">{{syncDialog.error}}</div>
+      <template v-else>
+        <div class="sync-summary">
+          <span v-for="t in syncDialog.perType" :key="t.apiName" class="sync-summary-item">{{t.name}}：{{t.fetched}}/{{t.count}}</span>
+          <span v-for="e in syncDialog.errors" :key="e.apiName" class="sync-summary-item sync-summary-err">{{e.name}} 失败：{{e.message}}</span>
+        </div>
+        <div class="sync-toolbar">
+          <input v-model="syncDialog.keyword" class="sync-input" style="width:220px" placeholder="按名称或需求ID筛选...">
+          <label class="sync-type-item"><input type="checkbox" v-model="syncDialog.onlyUnregistered"> 只看未导入</label>
+          <span style="flex:1"></span>
+          <span class="sync-hint">共 {{syncRows.length}} 条，已选 {{syncSelectedCount}}</span>
+          <button class="btn btn-outline btn-xs" @click="selectAllNew">全选新增</button>
+        </div>
+        <div class="sync-list">
+          <div v-for="r in syncRows" :key="r.workItemId" class="sync-row" :class="{existing:!r.isNew}">
+            <input type="checkbox" :checked="!!syncSelection[r.workItemId]" :disabled="!r.isNew" @change="toggleSyncRow(r.workItemId)">
+            <div class="sync-row-main">
+              <div class="sync-row-name" :title="r.name">{{r.name||'(无名称)'}}</div>
+              <div class="sync-row-meta">
+                <span class="sync-id">{{r.workItemId}}</span>
+                <span class="sync-tag">{{r.status||'-'}}</span>
+                <span class="sync-tag">{{r.workItemTypeName}}</span>
+                <span v-if="!r.isNew" class="sync-tag sync-tag-done">已导入</span>
+              </div>
+            </div>
+            <div class="sync-row-branches">
+              <template v-if="r.matches.length">
+                <span v-for="m in r.matches" :key="m.project+m.branch" class="sync-branch" :class="'via-'+m.via"
+                      :title="m.branch + (m.otherBranches.length ? '；该项目另有：' + m.otherBranches.join(' / ') : '')">
+                  {{m.project}} · {{truncateBranch(m.branch, 24)}}
+                  <span v-if="m.otherBranches.length" class="sync-branch-more">+{{m.otherBranches.length}}</span>
+                </span>
+              </template>
+              <span v-else class="sync-branch-none">未匹配到分支</span>
+            </div>
+            <a class="sync-link" :href="r.link" target="_blank" title="打开飞书需求">↗</a>
+          </div>
+          <div v-if="!syncRows.length" class="sync-hint" style="padding:20px;text-align:center">
+            没有符合条件的需求<span v-if="syncDialog.onlyUnregistered">（当前只显示未导入的，若上一批已全部导入，这里为空属正常）</span>
+          </div>
+        </div>
+      </template>
+    </div>
+    <div class="sync-footer">
+      <span class="sync-hint">导入只建新需求，已存在的不覆盖</span>
+      <button class="btn btn-outline btn-sm" @click="syncDialog.visible=false">取消</button>
+      <button class="btn btn-purple btn-sm" :disabled="!syncSelectedCount" @click="applySync">导入选中 {{syncSelectedCount}} 条</button>
+    </div>
+  </div>
+</div>
+
 </div>
 </div>
 <script src="./vue.global.js"></script>

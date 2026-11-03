@@ -29,6 +29,7 @@ function apiUrl(pathname) {
 const LS_BRANCH_INDEX = 'todo_branch_index'
 const LS_BRANCH_LINKS = 'todo_branch_links'
 const LS_BRANCH_TRIAGE = 'todo_branch_triage'
+const LS_MEEGLE_CONFIG = 'todo_meegle_config'
 /** 索引 TTL：分支一直在长，实测同一条分支两天内需求覆盖就会变，不能无限期复用 */
 const INDEX_TTL_MS = 10 * 60 * 1000
 
@@ -72,7 +73,20 @@ createApp({
       indexProgress: { visible: false, done: 0, total: 0 },
       branchLinks: {}, // { '项目\u0000分支': [需求ID] }
       branchTriage: {}, // { '项目\u0000分支': { action:'exempt'|'ignored', at } }
-      unregExpanded: true
+      unregExpanded: true,
+
+      // ↓↓↓ v2 新增：飞书项目同步 ↓↓↓
+      meegleStatus: { authenticated: null, host: '', error: '' },
+      meegleConfig: {
+        projectKey: '', simpleName: '', spaceName: '',
+        typeApiNames: [],
+        mqlTemplate: 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`',
+        maxPerType: 200,
+      },
+      syncSettings: { visible: false, loading: false, error: '', spaces: [], types: [] },
+      syncDialog: { visible: false, loading: false, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: true },
+      syncRaw: [],
+      syncSelection: {}
     })
 
     // ===== Sections (computed) =====
@@ -762,6 +776,8 @@ createApp({
         if (state.launchDialog.item) state.launchDialog.item = null
         if (state.branchModal.visible) state.branchModal.visible = false
         if (state.allBranchesModal.visible) state.allBranchesModal.visible = false
+        if (state.syncDialog.visible) state.syncDialog.visible = false
+        if (state.syncSettings.visible) state.syncSettings.visible = false
         if (state.searchQuery) state.searchQuery = ''
       }
     }
@@ -943,6 +959,270 @@ createApp({
       return [...byName.values()]
     })
 
+    // ===== v2：飞书项目需求同步 =====
+    //
+    // 同步是「消掉手工贴标题+链接」的主力：一次拉一批、去重、并按需求ID自动挂上分支。
+    // 关键前提：一个空间里「需求管理」类工作项是按业务域拆成多张表的
+    // （实测 ly_oms 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 张），
+    // 所以类型是多选，只查一张会静默漏掉其他域的全部需求。
+
+    const DEFAULT_MQL = 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`'
+
+    function saveMeegleConfig() {
+      try { localStorage.setItem(LS_MEEGLE_CONFIG, JSON.stringify(state.meegleConfig)) } catch {}
+    }
+
+    /** 提取文本里的 10 位需求ID（带数字边界，避免 7101366806 命中 17101366806） */
+    function extractReqIds(text) {
+      const out = []
+      const re = /(^|[^0-9])([0-9]{10})([^0-9]|$)/g
+      let m
+      const s = String(text || '')
+      while ((m = re.exec(s)) !== null) {
+        if (!out.includes(m[2])) out.push(m[2])
+        re.lastIndex -= 1 // 边界字符可能同时属于下一段的起始，回退一格避免漏配
+      }
+      return out
+    }
+
+    function isExistingRequirement(workItemId) {
+      return state.items.some(it => selfWorkItemId(it) === workItemId)
+    }
+
+    /**
+     * 需求ID → 分支 的反向索引（由分支索引翻转而来）。
+     * 一次遍历覆盖两条来源：L1（独占提交里的需求ID，能识别融合分支）、
+     * L2（分支名里的需求ID，兜住提交信息没写规范的）。
+     * 预计算成 Map 是为了避免在预览列表里对上千行逐行扫描所有分支。
+     */
+    const reqToBranchesMap = computed(() => {
+      const map = new Map()
+      const push = (id, entry) => {
+        if (!map.has(id)) map.set(id, [])
+        const arr = map.get(id)
+        if (!arr.some(x => x.project === entry.project && x.branch === entry.branch)) arr.push(entry)
+      }
+      for (const [project, idx] of Object.entries(state.branchIndex)) {
+        for (const [branch, info] of Object.entries(idx.branches || {})) {
+          if (info.merged) continue
+          for (const id of info.ids || []) push(id, { project, branch, via: 'L1', commits: info.commits })
+          for (const id of extractReqIds(branch)) push(id, { project, branch, via: 'L2', commits: info.commits })
+        }
+      }
+      return map
+    })
+
+    /**
+     * 同一项目命中多个分支时只留一条主分支：
+     * 优先 L1（提交证据比名字可靠），同级取独占提交更少的（越专一越可能是本需求的分支）。
+     * 其余分支保留在 otherBranches 里展示，不静默丢弃。
+     */
+    function pickPrimaryMatches(matches) {
+      const byProject = new Map()
+      for (const m of matches || []) {
+        const cur = byProject.get(m.project)
+        if (!cur) { byProject.set(m.project, { ...m, otherBranches: [] }); continue }
+        const better = (m.via === 'L1' && cur.via !== 'L1')
+          || (m.via === cur.via && (m.commits || 0) < (cur.commits || 0))
+        if (better) {
+          byProject.set(m.project, { ...m, otherBranches: [cur.branch, ...cur.otherBranches] })
+        } else {
+          cur.otherBranches.push(m.branch)
+        }
+      }
+      return [...byProject.values()]
+    }
+
+    function matchesOf(workItemId) {
+      return reqToBranchesMap.value.get(workItemId) || []
+    }
+
+    async function loadMeegleStatus() {
+      try {
+        const res = await fetch(apiUrl('/api/meegle/status'))
+        const data = await res.json()
+        state.meegleStatus = data.code ? { authenticated: false, host: '', error: data.error } : data
+      } catch (e) {
+        state.meegleStatus = { authenticated: false, host: '', error: e.message }
+      }
+      return state.meegleStatus
+    }
+
+    async function openSyncSettings() {
+      state.syncSettings.visible = true
+      state.syncSettings.loading = true
+      state.syncSettings.error = ''
+      try {
+        const res = await fetch(apiUrl('/api/meegle/spaces'))
+        const data = await res.json()
+        if (data.code) throw new Error(data.error || data.code)
+        state.syncSettings.spaces = data.spaces || []
+        if (!state.meegleConfig.projectKey && state.syncSettings.spaces.length) {
+          const first = state.syncSettings.spaces[0]
+          state.meegleConfig.projectKey = first.projectKey
+          state.meegleConfig.simpleName = first.simpleName
+          state.meegleConfig.spaceName = first.name
+        }
+        if (state.meegleConfig.projectKey) await loadTypes()
+      } catch (e) {
+        state.syncSettings.error = e.message
+      }
+      state.syncSettings.loading = false
+    }
+
+    async function loadTypes() {
+      if (!state.meegleConfig.projectKey) return
+      try {
+        const res = await fetch(apiUrl('/api/meegle/types?projectKey=' + encodeURIComponent(state.meegleConfig.projectKey)))
+        const data = await res.json()
+        if (data.code) throw new Error(data.error || data.code)
+        state.syncSettings.types = data.types || []
+        // 默认勾选所有「需求管理/优化」类，排除缺陷、版本、迭代、任务等非需求类型
+        if (!state.meegleConfig.typeApiNames.length) {
+          state.meegleConfig.typeApiNames = state.syncSettings.types
+            .filter(t => !t.disabled && /需求管理|优化/.test(t.name))
+            .map(t => t.apiName)
+        }
+      } catch (e) {
+        state.syncSettings.error = e.message
+      }
+    }
+
+    function selectSpace(projectKey) {
+      const s = state.syncSettings.spaces.find(x => x.projectKey === projectKey)
+      state.meegleConfig.projectKey = projectKey
+      state.meegleConfig.simpleName = s ? s.simpleName : projectKey
+      state.meegleConfig.spaceName = s ? s.name : ''
+      state.meegleConfig.typeApiNames = []
+      loadTypes()
+    }
+
+    function toggleType(apiName) {
+      const list = state.meegleConfig.typeApiNames
+      const i = list.indexOf(apiName)
+      if (i >= 0) list.splice(i, 1)
+      else list.push(apiName)
+    }
+
+    function saveSyncSettings() {
+      saveMeegleConfig()
+      state.syncSettings.visible = false
+      toast('同步设置已保存')
+    }
+
+    /** 顶部「同步飞书项目」入口：未登录就明确提示，不要让人对着空弹窗猜 */
+    async function openSyncDialog() {
+      if (!state.meegleConfig.projectKey || !state.meegleConfig.typeApiNames.length) {
+        toast('请先在「同步设置」里选择空间与工作项类型')
+        openSyncSettings()
+        return
+      }
+      const st = await loadMeegleStatus()
+      if (!st.authenticated) {
+        toast('未登录飞书项目，请在终端执行：meegle auth login --host ' + (st.host || 'project.feishu.cn'))
+        return
+      }
+      // 类型元数据必须先拿到：MQL 的表名用的是 typeKey，而除了 story 之外的
+      // 类型（oms/tms/bms…）typeKey 是一串哈希，与 apiName 并不相同。
+      // 拿 apiName 顶替会查错表 —— 要么报错，要么查到别的类型的数据。
+      if (!state.syncSettings.types.length) await loadTypes()
+      if (!state.syncSettings.types.length) {
+        toast('未能加载工作项类型，请先打开「同步设置」确认空间选择')
+        openSyncSettings()
+        return
+      }
+      state.syncDialog = { visible: true, loading: true, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: true }
+      state.syncSelection = {}
+      try {
+        await fetchMeegleItems()
+      } catch (e) {
+        state.syncDialog.error = e.message
+      }
+      state.syncDialog.loading = false
+    }
+
+    async function fetchMeegleItems() {
+      const cfg = state.meegleConfig
+      const types = state.syncSettings.types.filter(t => cfg.typeApiNames.includes(t.apiName))
+
+      const res = await fetch(apiUrl('/api/meegle/query'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectKey: cfg.projectKey,
+          simpleName: cfg.simpleName,
+          types,
+          mqlTemplate: cfg.mqlTemplate || DEFAULT_MQL,
+          maxPerType: cfg.maxPerType || 200,
+        }),
+      })
+      const data = await res.json()
+      if (data.code) throw new Error(data.error || data.code)
+      state.syncRaw = data.items || []
+      state.syncDialog.perType = data.perType || []
+      state.syncDialog.errors = data.errors || []
+    }
+
+    /** 预览行：标记是否为新增，并算好会挂上哪些分支 */
+    const syncRows = computed(() => {
+      const kw = (state.syncDialog.keyword || '').toLowerCase()
+      const rows = []
+      for (const r of state.syncRaw) {
+        const isNew = !isExistingRequirement(r.workItemId)
+        if (state.syncDialog.onlyUnregistered && !isNew) continue
+        if (kw && !(r.name || '').toLowerCase().includes(kw) && !r.workItemId.includes(kw)) continue
+        rows.push({ ...r, isNew, matches: pickPrimaryMatches(matchesOf(r.workItemId)) })
+      }
+      return rows
+    })
+
+    const syncSelectedCount = computed(() => Object.values(state.syncSelection).filter(Boolean).length)
+
+    function toggleSyncRow(workItemId) {
+      state.syncSelection[workItemId] = !state.syncSelection[workItemId]
+    }
+
+    function selectAllNew() {
+      const next = {}
+      for (const r of syncRows.value) if (r.isNew) next[r.workItemId] = true
+      state.syncSelection = next
+      toast(`已选中 ${Object.keys(next).length} 条新增需求`)
+    }
+
+    /** 导入选中项：只建新需求，已存在的默认不动（保护本地已人工调整过的数据） */
+    function applySync() {
+      const picked = syncRows.value.filter(r => state.syncSelection[r.workItemId] && r.isNew)
+      if (!picked.length) { toast('请先勾选要导入的新需求'); return }
+
+      let n = 0
+      for (const r of picked) {
+        const item = {
+          id: newId(),
+          name: r.name,
+          link: r.link,
+          status: 'new',
+          projects: r.matches.map(m => ({ name: m.project, branch: m.branch, notes: '' })),
+          syncBranches: [],
+          source: {
+            provider: 'meegle',
+            projectKey: state.meegleConfig.projectKey,
+            simpleName: state.meegleConfig.simpleName,
+            workItemType: r.workItemType,
+            workItemId: r.workItemId,
+            syncedAt: Date.now(),
+          },
+          _justAdded: true,
+        }
+        state.items.unshift(item)
+        n++
+        nextTick(() => setTimeout(() => { item._justAdded = false }, 350))
+      }
+      saveToLocalStorage()
+      state.syncDialog.visible = false
+      state.syncSelection = {}
+      toast(`已导入 ${n} 条需求`)
+    }
+
     // ===== Lifecycle =====
     document.addEventListener('keydown', handleKeydown)
     document.addEventListener('click', () => { if (state.ctxMenu.visible) closeCtxMenu() })
@@ -965,6 +1245,10 @@ createApp({
       try { state.branchIndex = JSON.parse(localStorage.getItem(LS_BRANCH_INDEX)) || {} } catch { state.branchIndex = {} }
       try { state.branchLinks = JSON.parse(localStorage.getItem(LS_BRANCH_LINKS)) || {} } catch { state.branchLinks = {} }
       try { state.branchTriage = JSON.parse(localStorage.getItem(LS_BRANCH_TRIAGE)) || {} } catch { state.branchTriage = {} }
+      try {
+        const cfg = JSON.parse(localStorage.getItem(LS_MEEGLE_CONFIG))
+        if (cfg && typeof cfg === 'object') state.meegleConfig = { ...state.meegleConfig, ...cfg }
+      } catch {}
 
       checkDailyReminder()
       autoFetchBranches()
@@ -1010,6 +1294,9 @@ createApp({
       dismissReminder, exportAndDismiss, saveLaunchBranch, toggleSection, openMrUrl,
       // v2：分支索引与关联
       refreshBranchIndex, branchOtherIds, impactIds, triageBranchGroup, restoreBranchTriage, deriveRepoUrl,
+      // v2：飞书项目同步
+      openSyncSettings, openSyncDialog, selectSpace, toggleType, saveSyncSettings, loadTypes,
+      fetchMeegleItems, toggleSyncRow, selectAllNew, applySync, matchesOf, pickPrimaryMatches,
       // Aliases for template
       searchQuery: computed({ get: () => state.searchQuery, set: v => { state.searchQuery = v.toLowerCase() } }),
       launchBranch: computed({ get: () => state.launchBranch, set: v => { state.launchBranch = v } }),
@@ -1043,7 +1330,16 @@ createApp({
       branchTriage: computed(() => state.branchTriage),
       indexBusy: computed(() => state.indexBusy),
       indexProgress: computed(() => state.indexProgress),
-      unregExpanded: computed({ get: () => state.unregExpanded, set: v => { state.unregExpanded = v } })
+      unregExpanded: computed({ get: () => state.unregExpanded, set: v => { state.unregExpanded = v } }),
+      // v2 飞书同步别名
+      meegleConfig: computed(() => state.meegleConfig),
+      meegleStatus: computed(() => state.meegleStatus),
+      syncSettings: computed(() => state.syncSettings),
+      syncDialog: computed(() => state.syncDialog),
+      syncRaw: computed(() => state.syncRaw),
+      syncSelection: computed(() => state.syncSelection),
+      syncRows,
+      syncSelectedCount
     }
   }
 }).mount('#app')

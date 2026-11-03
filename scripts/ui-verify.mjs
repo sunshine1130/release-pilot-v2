@@ -75,7 +75,27 @@ const SEED_ITEMS = [
     projects: [{ name: 'ops-web', branch: 'feat/ops四需求合并分支', notes: '' }],
     syncBranches: [],
   },
+  {
+    // 这条的需求ID 落在飞书 oms 类型第一页，用来验证「已导入」标记
+    id: 'uitest3',
+    name: 'UI验证-已导入需求',
+    link: 'https://project.feishu.cn/ly_oms/oms/detail/7154016953',
+    status: 'new',
+    projects: [],
+    syncBranches: [],
+  },
 ]
+
+// 同步配置预置：真实空间 ly_oms，只选 story + oms 两类、每类只拉一页，
+// 把验证控制在 4 次 meegle 调用以内
+const MEEGLE_CONFIG = {
+  projectKey: '6629becdcfea521fda9b97e4',
+  simpleName: 'ly_oms',
+  spaceName: '信息部工作汇总',
+  typeApiNames: ['story', 'oms'],
+  mqlTemplate: 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`',
+  maxPerType: 50,
+}
 
 const browser = await chromium.launch()
 const context = await browser.newContext()
@@ -139,12 +159,17 @@ try {
   check('未登记分支区出现 target 分支', (await page.getByText('feat/mdm二期分支').count()) > 0)
   check('未登记分支带项目标签', (await page.getByText(/ops-web · \d+/).count()) > 0)
 
-  // 4) 影响面提示：融合分支共 5 个需求ID，每条需求看到的「还覆盖」都是 4 个。
-  //    两条需求必须都出现提示：一条靠 source.workItemId，一条只能靠链接里提取的ID
+  // 4) 影响面提示：期望值从实际索引算，不能写死。
+  //    这条分支仍在长（实测 10-29 是 4 个ID、11-03 已经 6 个），写死数字必然过几天就红
+  const expectedOthers = await page.evaluate(() => {
+    const idx = JSON.parse(localStorage.getItem('todo_branch_index') || '{}')
+    const entry = idx['ops-web'] && idx['ops-web'].branches && idx['ops-web'].branches['feat/ops四需求合并分支']
+    return ((entry && entry.ids) || []).length - 1
+  })
   const impacts = await page.getByText(/还覆盖 \d+ 个需求/).allTextContents()
   check('影响面提示数量正确（两条需求都命中）',
-    impacts.length === 2 && impacts.every(t => /还覆盖 4 个需求/.test(t)),
-    `${impacts.length} 条：${impacts.map(t => t.trim()).join(' / ')}`)
+    expectedOthers > 0 && impacts.length === 2 && impacts.every(t => new RegExp(`还覆盖 ${expectedOthers} 个需求`).test(t)),
+    `期望 ${expectedOthers}，实际：${impacts.map(t => t.trim()).join(' / ')}`)
 
   // 5) 处置：点「无需需求」后该分支卡片消失
   //    断言必须落在卡片本身：getByText 会同时匹配到外层容器，用文本计数会误判
@@ -166,6 +191,82 @@ try {
   await page.getByRole('link', { name: '恢复' }).first().click()
   await page.waitForTimeout(300)
   check('恢复后卡片回来', (await cardOf('feat/mdm二期分支').count()) === 1)
+
+  // ===== 8) 飞书项目同步（真实调用 meegle CLI）=====
+  // 两个弹窗共用 .sync-box，选择器必须按容器区分，否则 Playwright 严格模式会因多匹配报错
+  const settingsBox = page.locator('.sync-box:not(.sync-box-wide)')
+  const previewBox = page.locator('.sync-box-wide')
+
+  await page.evaluate(
+    ({ cfg, branchId }) => {
+      localStorage.setItem('todo_meegle_config', JSON.stringify(cfg))
+      // 合成一条覆盖某真实需求的跨需求分支，让「自动挂分支」这条链路可以被确定性断言
+      // （真实索引里符合条件的分支不在飞书列表第一页）
+      const idx = JSON.parse(localStorage.getItem('todo_branch_index') || '{}')
+      idx['ops-web'] = idx['ops-web'] || { branches: {}, unregistered: [] }
+      idx['ops-web'].branches['feat/测试-跨需求分支'] = {
+        ids: [branchId], commits: 2, lastDate: '2026-11-03', merged: false,
+      }
+      localStorage.setItem('todo_branch_index', JSON.stringify(idx))
+    },
+    { cfg: MEEGLE_CONFIG, branchId: '7153729281' },
+  )
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(500)
+
+  const totalBefore = (await page.locator('h1 .sub').textContent()) || ''
+
+  await page.getByRole('button', { name: '同步飞书项目' }).click()
+  await previewBox.locator('.sync-row').first().waitFor({ timeout: 240000 })
+  const rowCount = await previewBox.locator('.sync-row').count()
+  check('同步预览拉到飞书需求', rowCount > 0, `${rowCount} 行`)
+
+  const summary = await previewBox.locator('.sync-summary-item').allTextContents()
+  check('按工作项类型汇总展示', summary.length > 0, summary.join(' | ').slice(0, 140))
+  check('拉取无类型级错误', (await previewBox.locator('.sync-summary-err').count()) === 0)
+
+  const l1 = await previewBox.locator('.sync-row', { hasText: '7153729281' }).locator('.sync-branch.via-L1').count()
+  check('按需求ID自动匹配到分支（L1）', l1 > 0)
+  await page.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-sync.png'), fullPage: false })
+
+  await previewBox.getByText('只看未导入').click()
+  await page.waitForTimeout(200)
+  const doneTag = await previewBox.locator('.sync-row', { hasText: '7154016953' }).locator('.sync-tag-done').count()
+  check('已导入的需求被标记', doneTag > 0)
+
+  const firstNewId = ((await previewBox.locator('.sync-row:not(.existing) .sync-id').first().textContent()) || '').trim()
+  await previewBox.getByRole('button', { name: '全选新增' }).click()
+  await page.waitForTimeout(200)
+  await previewBox.locator('.sync-footer .btn-purple').click()
+  await page.waitForTimeout(800)
+
+  const totalAfter = (await page.locator('h1 .sub').textContent()) || ''
+  check('导入后需求总数增加', totalBefore !== totalAfter, `${totalBefore.trim()} → ${totalAfter.trim()}`)
+
+  // 再拉一次验证去重：注意必须**先取消「只看未导入」**——
+  // 全部刚导入完时该筛选下本来就 0 行，直接等行会出现只会是测试自己的错
+  await page.getByRole('button', { name: '同步飞书项目' }).click()
+  await previewBox.locator('.sync-row, .sync-hint').first().waitFor({ timeout: 240000 })
+  await previewBox.getByText('只看未导入').click()
+  await page.waitForTimeout(300)
+  const dedup = await previewBox.locator('.sync-row', { hasText: firstNewId }).locator('.sync-tag-done').count()
+  check('重复同步不产生重复需求（按 workItemId 去重）', dedup > 0, `刚导入的 ${firstNewId}`)
+  await previewBox.locator('.sync-header .btn-close').click()
+  await page.waitForTimeout(200)
+
+  // ===== 9) 同步设置弹窗 =====
+  await page.getByRole('button', { name: '同步设置' }).click()
+  // 必须先等空间下拉真的有选项：工作项类型在上一阶段已经加载过，
+  // 如果只等类型列表，会在空间请求还没回来时就往下走，误判成「0 个空间」。
+  // 注意等的是 attached 而不是 visible —— <option> 在闭合的 select 里没有布局盒，
+  // Playwright 永远判定为不可见，等 visible 只会白白超时。
+  await settingsBox.locator('.sync-field select option').first().waitFor({ state: 'attached', timeout: 60000 })
+  const spaceOptions = await settingsBox.locator('.sync-field select option').count()
+  check('同步设置加载出空间', spaceOptions > 0, `${spaceOptions} 个空间`)
+  const typeCount = await settingsBox.locator('.sync-types .sync-type-item').count()
+  check('同步设置加载出工作项类型', typeCount > 5, `${typeCount} 个类型`)
+  await settingsBox.locator('.sync-footer .btn-purple').click()
+  await page.waitForTimeout(300)
 
   await page.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify.png'), fullPage: true })
   console.log(`\n截图已保存: docs/ui-verify.png`)

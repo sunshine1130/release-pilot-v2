@@ -1528,3 +1528,65 @@ input[data-role="syncProjectName"] {
   font-size: 10px; padding: 1px 5px; border-radius: 8px; white-space: nowrap; cursor: help;
   color: var(--warning); background: var(--warning-bg); border: 1px solid rgba(245,158,11,0.25);
 }
+
+/* ===== v2: 飞书项目同步弹窗 ===== */
+.sync-box {
+  background: var(--surface); border-radius: var(--radius-lg); width: 620px; max-width: 94vw;
+  max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+}
+.sync-box-wide { width: 980px; }
+.sync-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px;
+}
+.sync-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
+.sync-footer {
+  display: flex; align-items: center; gap: 8px; justify-content: flex-end;
+  padding: 12px 18px; border-top: 1px solid var(--border);
+}
+.sync-field { margin-bottom: 14px; }
+.sync-field > label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.sync-field > label small { color: var(--text-muted); font-weight: 400; margin-left: 6px; }
+.sync-input {
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 12px; font-family: inherit; color: var(--text); background: var(--surface);
+}
+.sync-mql { width: 100%; font-family: var(--mono); resize: vertical; }
+.sync-types { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.sync-type-item { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.sync-type-item.disabled { opacity: 0.45; cursor: not-allowed; }
+.sync-hint { font-size: 12px; color: var(--text-muted); }
+.sync-error {
+  font-size: 12px; color: var(--danger); background: var(--danger-bg);
+  border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 12px;
+}
+.sync-summary { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 10px; font-size: 11px; color: var(--text-muted); }
+.sync-summary-err { color: var(--danger); }
+.sync-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.sync-list { border: 1px solid var(--border-light); border-radius: var(--radius-sm); max-height: 46vh; overflow-y: auto; }
+.sync-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+  border-bottom: 1px solid var(--border-light); font-size: 12px;
+}
+.sync-row:last-child { border-bottom: none; }
+.sync-row.existing { background: var(--surface-raised); opacity: 0.72; }
+.sync-row-main { min-width: 300px; flex: 1; }
+.sync-row-name { color: var(--text); margin-bottom: 3px; }
+.sync-row-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sync-id { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.sync-tag { font-size: 10px; color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border-light); border-radius: 8px; padding: 0 5px; }
+.sync-tag-done { color: var(--success); border-color: var(--success); }
+.sync-row-branches { display: flex; gap: 5px; flex-wrap: wrap; min-width: 240px; flex: 1; }
+.sync-branch {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px; white-space: nowrap; cursor: help;
+  border: 1px solid var(--border); color: var(--text-secondary);
+}
+.sync-branch.via-L1 { color: var(--success); border-color: var(--success); background: var(--success-bg); }
+.sync-branch.via-L2 { color: var(--warning); border-color: var(--warning); background: var(--warning-bg); border-style: dashed; }
+.sync-branch-more { color: var(--text-muted); margin-left: 3px; }
+.sync-branch-none { font-size: 10px; color: var(--text-muted); }
+.sync-link { color: var(--accent); text-decoration: none; flex-shrink: 0; }
+
+/* v2: 按钮禁用态。v1 的样式里没有 :disabled，禁用按钮看起来仍可点，
+   用户会反复点一个不会响应的按钮（「导入选中 0 条」第一次出现时就踩到了）。 */
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
