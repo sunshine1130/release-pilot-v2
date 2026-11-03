@@ -28,3 +28,6 @@ dist-ssr
 *.sln
 *.sw?
 .playwright-mcp
+
+# v2: 运行时端口文件（端口漂移时前端据此对齐）
+.server-port
