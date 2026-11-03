@@ -1502,3 +1502,29 @@ input[data-role="syncProjectName"] {
   }
 }
 [v-cloak] { display: none; }
+
+/* ===== v2: 未登记分支 / 影响面提示 ===== */
+.unreg-panel .pm-header { cursor: pointer; }
+.unreg-hint { font-size: 12px; color: var(--text-muted); padding: 8px 0; line-height: 1.8; }
+.unreg-card {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; margin-bottom: 6px;
+  border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+.unreg-main { display: flex; flex-direction: column; gap: 2px; min-width: 260px; flex: 1; }
+.unreg-name { font-family: var(--mono); font-size: 12px; color: var(--text); word-break: break-all; }
+.unreg-meta { font-size: 11px; color: var(--text-muted); }
+.unreg-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.unreg-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.unreg-restore {
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-light);
+  font-size: 11px; color: var(--text-muted); line-height: 1.9;
+}
+.unreg-restore-item { margin-right: 10px; }
+.unreg-restore-action { color: var(--text-muted); }
+.unreg-restore a { color: var(--accent); margin-left: 4px; }
+.branch-impact {
+  font-size: 10px; padding: 1px 5px; border-radius: 8px; white-space: nowrap; cursor: help;
+  color: var(--warning); background: var(--warning-bg); border: 1px solid rgba(245,158,11,0.25);
+}

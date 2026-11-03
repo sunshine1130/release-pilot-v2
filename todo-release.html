@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -36,6 +36,7 @@
       <button class="btn btn-success btn-sm" @click="exportToFile">导出</button>
       <label class="btn btn-outline btn-sm" style="cursor:pointer">导入 <input type="file" accept=".json" style="display:none" @change="importFromFile" /></label>
       <button class="btn btn-warning btn-sm" @click="fetchAllBranches">获取分支</button>
+      <button class="btn btn-info btn-sm" :disabled="indexBusy" @click="refreshBranchIndex(true)">{{indexBusy?'刷新中...':'刷新分支索引'}}</button>
       <button class="btn btn-primary" @click="startAdding">+ 新增需求</button>
     </div>
   </div>
@@ -48,6 +49,17 @@
     </div>
     <div class="branch-progress-track">
       <div class="branch-progress-bar" :style="{width:(branchProgress.done/branchProgress.total*100)+'%'}"></div>
+    </div>
+  </div>
+
+  <!-- v2: 分支索引刷新进度（要跑本地 git 日志分析，比拉分支列表慢，必须有进度反馈） -->
+  <div class="branch-progress" v-if="indexProgress.visible">
+    <div class="branch-progress-info">
+      <span class="branch-progress-label">刷新分支索引</span>
+      <span class="branch-progress-text">{{indexProgress.done}}/{{indexProgress.total}}</span>
+    </div>
+    <div class="branch-progress-track">
+      <div class="branch-progress-bar" :style="{width:(indexProgress.done/indexProgress.total*100)+'%'}"></div>
     </div>
   </div>
 
@@ -90,6 +102,48 @@
           <input v-model="launchBranch" placeholder="如 master_launched" style="width:160px" @keydown.enter="saveLaunchBranch">
           <button class="btn btn-purple btn-sm" @click="saveLaunchBranch">保存上线分支</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- v2: 未登记分支 —— 有提交但反查不到需求ID，发版时最容易漏掉的就是这些 -->
+  <div class="section card unreg-panel">
+    <div class="card-body">
+      <div class="pm-header" @click="unregExpanded=!unregExpanded">
+        <span class="arrow" :class="{open:unregExpanded}">▶</span>
+        <span>未登记分支</span>
+        <span class="hint" v-if="unregisteredGroups.length">有 {{unregisteredGroups.length}} 条分支查不到需求登记，确认是否需要一起发版</span>
+        <span class="hint" v-else-if="Object.keys(branchIndex).length">没有未登记分支</span>
+        <span class="hint" v-else>尚未刷新分支索引</span>
+      </div>
+      <div class="collapse-body" :class="{expanded:unregExpanded}">
+        <div v-if="!Object.keys(branchIndex).length" class="unreg-hint">
+          点击右上角「刷新分支索引」后，这里会列出「有提交但查不到需求ID」的分支。
+          <br>（需要项目同时配置了 MR 地址与本地路径 —— 反查要用本地提交历史）
+        </div>
+        <template v-else>
+          <div v-for="g in unregisteredGroups" :key="g.name" class="unreg-card">
+            <div class="unreg-main">
+              <span class="unreg-name" :title="g.name">{{g.name}}</span>
+              <span class="unreg-meta">{{g.projects.length}} 个项目 · 共 {{g.totalCommits}} 个提交 · 最近 {{g.lastDate||'-'}}</span>
+            </div>
+            <div class="unreg-tags">
+              <span v-for="p in g.projects" :key="p.project" class="project-tag" :data-color="getColorIdx(p.project)" style="font-size:11px">{{p.project}} · {{p.commits}}</span>
+            </div>
+            <div class="unreg-actions">
+              <button class="btn btn-outline btn-xs" @click="triageBranchGroup(g,'exempt')" title="纯技术重构或环境调整，不需要需求登记">无需需求</button>
+              <button class="btn btn-secondary btn-xs" @click="triageBranchGroup(g,'ignored')" title="已废弃或不再关心，不再提示">忽略</button>
+            </div>
+          </div>
+          <div v-if="!unregisteredGroups.length" class="empty-state" style="padding:10px 0">暂无未登记分支</div>
+          <div v-if="triagedGroups.length" class="unreg-restore">
+            已处置 {{triagedGroups.length}} 条：
+            <span v-for="g in triagedGroups" :key="g.name" class="unreg-restore-item">
+              {{g.name}}<span class="unreg-restore-action">（{{g.action==='exempt'?'无需需求':'已忽略'}}）</span>
+              <a href="#" @click.prevent="restoreBranchTriage(g)">恢复</a>
+            </span>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -201,6 +255,7 @@
                             <span class="branch-text" :title="(getProjectInfo(p.name)?.mr?'🔗 ':'')+p.branch" @click.stop="clickBranch(item,p,'project')">{{truncateBranch(p.branch)}}</span>
                             <button class="copy-btn" title="复制" @click.stop="copyText(p.branch)">📋</button>
                           </span>
+                          <span v-if="impactIds(item,p).length" class="branch-impact" :title="'此分支还覆盖：'+impactIds(item,p).join(' / ')">还覆盖 {{impactIds(item,p).length}} 个需求</span>
                           <button v-if="p.notes" class="note-btn has-notes" title="查看备注" @click.stop="openNoteDialog(item,pi,'project',false)">📝</button>
                         </div>
                       </template>
@@ -214,6 +269,7 @@
                             <span class="branch-text" :title="(getProjectInfo(sb.project)?.mr?'🔗 ':'')+sb.branch" @click.stop="clickBranch(item,{name:sb.project,branch:sb.branch},'sync')">{{truncateBranch(sb.branch)}}</span>
                             <button class="copy-btn" title="复制" @click.stop="copyText(sb.branch)">📋</button>
                           </span>
+                          <span v-if="impactIds(item,sb).length" class="branch-impact" :title="'此分支还覆盖：'+impactIds(item,sb).join(' / ')">还覆盖 {{impactIds(item,sb).length}} 个需求</span>
                           <button v-if="sb.notes" class="note-btn has-notes" title="查看备注" @click.stop="openNoteDialog(item,sbi,'sync',false)">📝</button>
                         </div>
                       </template>

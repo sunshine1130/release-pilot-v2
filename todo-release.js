@@ -1,6 +1,36 @@
 const { createApp, reactive, computed, watch, nextTick, onMounted } = Vue
-const API_PORT = 1949
 const JSON_FILENAME = 'toDo.json'
+
+/**
+ * 本地引擎地址。
+ *
+ * 引擎在 1949 被占用时会自动顺延，并把实际端口写进同目录的 .server-port。
+ * 这里如果继续写死 1949，服务一旦漂移，页面上所有请求都会打到别的进程上，
+ * 而且不报任何错 —— 只表现为「按钮点了没反应」，极难排查。
+ * 所以启动时先读端口文件，读不到再退回默认值（旧引擎不写这个文件，属正常情况）。
+ */
+const DEFAULT_API_PORT = 1949
+const api = { port: DEFAULT_API_PORT }
+
+async function resolveApiPort() {
+  try {
+    const resp = await fetch('./.server-port', { cache: 'no-store' })
+    if (!resp.ok) return
+    const text = (await resp.text()).trim()
+    if (/^\d+$/.test(text)) api.port = Number(text)
+  } catch {}
+}
+
+function apiUrl(pathname) {
+  return `http://localhost:${api.port}${pathname}`
+}
+
+// v2 新增的持久化键（不动 v1 既有的四个键）
+const LS_BRANCH_INDEX = 'todo_branch_index'
+const LS_BRANCH_LINKS = 'todo_branch_links'
+const LS_BRANCH_TRIAGE = 'todo_branch_triage'
+/** 索引 TTL：分支一直在长，实测同一条分支两天内需求覆盖就会变，不能无限期复用 */
+const INDEX_TTL_MS = 10 * 60 * 1000
 
 createApp({
   setup() {
@@ -33,7 +63,16 @@ createApp({
       allBranchesModal: { visible: false, projects: [], search: '', loading: false, releasedSet: new Set() },
       ctxMenu: { visible: false, x: 0, y: 0, item: null, dataItem: null, projIndex: -1, field: '' },
       projDropdown: { visible: false, x: 0, y: 0, w: 0, filtered: [], target: null, field: '' },
-      sectionExpanded: { pending: true, releasing: false, released: false }
+      sectionExpanded: { pending: true, releasing: false, released: false },
+
+      // ↓↓↓ v2 新增：分支索引 / 人工关联记忆 / 未登记分支处置 ↓↓↓
+      // branchIndex[项目名] = { base, branches:{ 分支名:{ids,commits,lastDate,merged,skipped} }, unregistered:[分支名], timestamp }
+      branchIndex: {},
+      indexBusy: false,
+      indexProgress: { visible: false, done: 0, total: 0 },
+      branchLinks: {}, // { '项目\u0000分支': [需求ID] }
+      branchTriage: {}, // { '项目\u0000分支': { action:'exempt'|'ignored', at } }
+      unregExpanded: true
     })
 
     // ===== Sections (computed) =====
@@ -567,7 +606,7 @@ createApp({
       }
 
       try {
-        const resp = await fetch('http://localhost:' + API_PORT + '/api/git-user')
+        const resp = await fetch(apiUrl('/api/git-user'))
         if (!resp.ok) { toast('请先启动服务器: node server.js'); return }
       } catch { toast('请先启动服务器: node server.js'); return }
 
@@ -575,14 +614,14 @@ createApp({
 
       let gitUser = null
       try {
-        const userRes = await fetch('http://localhost:' + API_PORT + '/api/git-user')
+        const userRes = await fetch(apiUrl('/api/git-user'))
         const userData = await userRes.json()
         gitUser = userData.user
       } catch {}
 
       let branches = []
       try {
-        const url = `http://localhost:${API_PORT}/api/branches?path=${encodeURIComponent(project.localPath)}&user=${encodeURIComponent(gitUser || '')}`
+        const url = apiUrl(`/api/branches?path=${encodeURIComponent(project.localPath)}&user=${encodeURIComponent(gitUser || '')}`)
         const res = await fetch(url)
         const data = await res.json()
         if (data.branches) {
@@ -615,13 +654,13 @@ createApp({
       if (!projectsWithPath.length) { toast('没有配置本地路径的项目'); return }
 
       try {
-        const resp = await fetch('http://localhost:' + API_PORT + '/api/git-user')
+        const resp = await fetch(apiUrl('/api/git-user'))
         if (!resp.ok) throw new Error()
       } catch { toast('请先启动服务器: node server.js'); return }
 
       let gitUser = null
       try {
-        const userRes = await fetch('http://localhost:' + API_PORT + '/api/git-user')
+        const userRes = await fetch(apiUrl('/api/git-user'))
         const userData = await userRes.json()
         gitUser = userData.user
       } catch {}
@@ -632,7 +671,7 @@ createApp({
       const results = []
       for (const project of projectsWithPath) {
         try {
-          const url = `http://localhost:${API_PORT}/api/branches?path=${encodeURIComponent(project.localPath)}&user=${encodeURIComponent(gitUser || '')}`
+          const url = apiUrl(`/api/branches?path=${encodeURIComponent(project.localPath)}&user=${encodeURIComponent(gitUser || '')}`)
           const res = await fetch(url)
           const data = await res.json()
           if (data.error) {
@@ -661,13 +700,13 @@ createApp({
       if (!projectsWithPath.length) return
 
       try {
-        const resp = await fetch('http://localhost:' + API_PORT + '/api/git-user')
+        const resp = await fetch(apiUrl('/api/git-user'))
         if (!resp.ok) return
       } catch { return }
 
       let gitUser = null
       try {
-        const userRes = await fetch('http://localhost:' + API_PORT + '/api/git-user')
+        const userRes = await fetch(apiUrl('/api/git-user'))
         const userData = await userRes.json()
         gitUser = userData.user
       } catch {}
@@ -676,7 +715,7 @@ createApp({
       let done = 0
       for (const project of projectsWithPath) {
         try {
-          const url = `http://localhost:${API_PORT}/api/branches?path=${encodeURIComponent(project.localPath)}&user=${encodeURIComponent(gitUser || '')}`
+          const url = apiUrl(`/api/branches?path=${encodeURIComponent(project.localPath)}&user=${encodeURIComponent(gitUser || '')}`)
           const res = await fetch(url)
           const data = await res.json()
           if (!data.error && data.branches) {
@@ -727,11 +766,191 @@ createApp({
       }
     }
 
+    // ===== v2：分支索引与需求↔分支关联 =====
+    //
+    // 关联不靠分支名，靠「分支 first-parent 独占提交里的需求ID」：
+    // 融合分支（一个分支服务多个需求）通常不带需求ID，靠名字永远匹配不到。
+    // 索引由引擎算好（/api/git/branch-index），前端只做反查与展示。
+
+    function branchKey(project, branch) { return project + '\u0000' + branch }
+
+    /**
+     * 从 MR 地址推导仓库地址。
+     * 项目里已经维护了 MR 地址，绝大多数情况下不必再让人填一遍仓库地址。
+     */
+    function deriveRepoUrl(mr) {
+      if (!mr) return ''
+      let s = String(mr).trim().split('#')[0].split('?')[0].replace(/\/+$/, '')
+      if (!/^https?:\/\//i.test(s)) return ''
+      const cutNew = s.indexOf('/-/merge_requests')
+      const cutOld = s.indexOf('/merge_requests')
+      if (cutNew >= 0) s = s.slice(0, cutNew)
+      else if (cutOld >= 0) s = s.slice(0, cutOld)
+      s = s.replace(/\/+$/, '')
+      return /\.git$/.test(s) ? s : s + '.git'
+    }
+
+    function saveBranchIndex() {
+      try { localStorage.setItem(LS_BRANCH_INDEX, JSON.stringify(state.branchIndex)) } catch {}
+    }
+
+    function saveBranchTriage() {
+      try { localStorage.setItem(LS_BRANCH_TRIAGE, JSON.stringify(state.branchTriage)) } catch {}
+    }
+
+    /** 缺 timestamp 一律视为过期：历史脏数据不能被当成新鲜结果继续用 */
+    function indexStale(entry) {
+      return !entry || !entry.timestamp || (Date.now() - entry.timestamp) > INDEX_TTL_MS
+    }
+
+    function hasFreshIndex() {
+      const projects = state.projectNames.filter(p => p.localPath && deriveRepoUrl(p.mr))
+      if (!projects.length) return false
+      return projects.every(p => !indexStale(state.branchIndex[p.name]))
+    }
+
+    /**
+     * 刷新分支索引。
+     *
+     * 只有「配了 MR 地址 + 配了本地路径」的项目才可能算出需求ID：反查要用本地提交历史，
+     * 没 clone 就没得算。这种项目直接跳过并提示，而不是静默返回空结果让人以为「没有关联」。
+     */
+    async function refreshBranchIndex(force) {
+      if (state.indexBusy) { toast('正在刷新分支索引，请稍候'); return }
+
+      const targets = state.projectNames.filter(p => p.localPath && deriveRepoUrl(p.mr))
+      if (!targets.length) { toast('没有同时配置 MR 地址与本地路径的项目，无法反查需求ID'); return }
+
+      state.indexBusy = true
+      state.indexProgress = { visible: true, done: 0, total: targets.length }
+      let ok = 0
+
+      for (const p of targets) {
+        try {
+          const query = `?path=${encodeURIComponent(p.localPath)}&repo=${encodeURIComponent(deriveRepoUrl(p.mr))}${force ? '&refresh=1' : ''}`
+          const res = await fetch(apiUrl('/api/git/branch-index') + query)
+          const data = await res.json()
+          if (data.code) throw new Error(data.error || data.code)
+
+          const branches = {}
+          for (const b of data.branches) {
+            branches[b.name] = { ids: b.ids, commits: b.commits, lastDate: b.lastDate, merged: b.merged, skipped: b.skipped }
+          }
+          state.branchIndex[p.name] = {
+            base: data.base,
+            branches,
+            unregistered: (data.unregistered || []).map(u => u.name),
+            remoteFiltered: !!data.remoteFiltered,
+            remoteOnly: data.remoteOnly || [],
+            timestamp: Date.now()
+          }
+          ok++
+        } catch (e) {
+          toast(`[${p.name}] 索引失败：${e.message}`)
+        }
+        state.indexProgress.done++
+      }
+
+      state.indexBusy = false
+      saveBranchIndex()
+      setTimeout(() => { state.indexProgress.visible = false }, 800)
+      toast(`分支索引已刷新（${ok}/${targets.length} 个项目）`)
+    }
+
+    /** 该分支上除当前需求外还覆盖哪些需求ID —— 用于「还服务 N 个需求」的影响面提示 */
+    function branchOtherIds(projectName, branchName, selfId) {
+      const entry = state.branchIndex[projectName]
+      const info = entry && entry.branches[branchName]
+      if (!info || !info.ids) return []
+      return info.ids.filter(id => id !== selfId)
+    }
+
+    /**
+     * 取一条需求自身的飞书需求ID。
+     *
+     * 优先用同步写入的 source.workItemId；老数据（手工录入的）没有该字段，
+     * 就从需求链接里提 —— 飞书需求详情链接天然以 work_item_id 结尾
+     * （/xxx/story/detail/7134246577）。不这样做的话，影响面提示对历史需求全部失效，
+     * 而历史需求恰恰是最容易漏发的那批。
+     */
+    function selfWorkItemId(item) {
+      if (item.source && item.source.workItemId) return item.source.workItemId
+      const m = String(item.link || '').match(/(^|[^0-9])([0-9]{10})([^0-9]|$)/)
+      return m ? m[2] : ''
+    }
+
+    /**
+     * 影响面：某条需求行的分支还覆盖哪些别的需求。
+     * 融合分支很容易只被登记到一个需求名下（分支名只写了一个ID，代码里其实覆盖好几个），
+     * 发版时漏掉的就是这些「隐形的同行者」，所以要在列表里直接提示出来。
+     */
+    function impactIds(item, entry) {
+      const projectName = entry.name || entry.project || ''
+      const branchName = entry.branch || ''
+      if (!projectName || !branchName) return []
+      return branchOtherIds(projectName, branchName, selfWorkItemId(item))
+    }
+
+    /**
+     * 未登记分支：有独占提交、但反查不到任何需求ID。
+     * 发版时最容易漏掉的就是这些 —— 需求还没出、或者一堆优化都做在一个分支里。
+     */
+    const unregisteredGroups = computed(() => {
+      const byName = new Map()
+      for (const [project, entry] of Object.entries(state.branchIndex)) {
+        for (const name of entry.unregistered || []) {
+          if (state.branchTriage[branchKey(project, name)]) continue
+          const info = (entry.branches || {})[name] || {}
+          const g = byName.get(name) || { name, projects: [], totalCommits: 0, lastDate: '' }
+          g.projects.push({ project, commits: info.commits || 0, lastDate: info.lastDate || '' })
+          g.totalCommits += info.commits || 0
+          if ((info.lastDate || '') > g.lastDate) g.lastDate = info.lastDate
+          byName.set(name, g)
+        }
+      }
+      return [...byName.values()].sort((a, b) => b.totalCommits - a.totalCommits)
+    })
+
+    /**
+     * 处置一个未登记分支。
+     * 按分支名一次处置它出现的所有项目：同名分支常横跨多个仓库
+     * （如 feat/mdm二期分支 同时在 aps/scm/ops），逐个项目点三次是纯浪费。
+     */
+    function triageBranchGroup(group, action) {
+      for (const p of group.projects) {
+        state.branchTriage[branchKey(p.project, group.name)] = { action, at: Date.now() }
+      }
+      saveBranchTriage()
+      toast(action === 'exempt' ? `已标记「无需需求」：${group.name}` : `已忽略：${group.name}`)
+    }
+
+    function restoreBranchTriage(group) {
+      for (const e of group.entries) delete state.branchTriage[e.key]
+      saveBranchTriage()
+      toast('已恢复提示')
+    }
+
+    /** 已处置的分支（折叠区展示 + 可恢复） */
+    const triagedGroups = computed(() => {
+      const byName = new Map()
+      for (const [key, rec] of Object.entries(state.branchTriage)) {
+        const parts = key.split('\u0000')
+        const name = parts[1] || key
+        const g = byName.get(name) || { name, entries: [], action: rec.action }
+        g.entries.push({ project: parts[0], key })
+        byName.set(name, g)
+      }
+      return [...byName.values()]
+    })
+
     // ===== Lifecycle =====
     document.addEventListener('keydown', handleKeydown)
     document.addEventListener('click', () => { if (state.ctxMenu.visible) closeCtxMenu() })
 
     onMounted(async () => {
+      // 端口必须在任何接口调用之前确定，否则会打到别的进程上（旧引擎不写端口文件，退回默认值）
+      await resolveApiPort()
+
       // Load data
       const loaded = await loadFromJsonFile()
       if (!loaded) {
@@ -740,6 +959,13 @@ createApp({
         try { state.branchesCache = JSON.parse(localStorage.getItem('todo_branch_cache')) || {} } catch { state.branchesCache = {} }
         state.launchBranch = localStorage.getItem('todo_launch_branch') || ''
       }
+
+      // v2 的三个键始终从 localStorage 读：toDo.json 里没有它们，
+      // 不能因为「已从 json 加载」就跳过，否则人工处置记录每次刷新都会丢
+      try { state.branchIndex = JSON.parse(localStorage.getItem(LS_BRANCH_INDEX)) || {} } catch { state.branchIndex = {} }
+      try { state.branchLinks = JSON.parse(localStorage.getItem(LS_BRANCH_LINKS)) || {} } catch { state.branchLinks = {} }
+      try { state.branchTriage = JSON.parse(localStorage.getItem(LS_BRANCH_TRIAGE)) || {} } catch { state.branchTriage = {} }
+
       checkDailyReminder()
       autoFetchBranches()
     })
@@ -782,6 +1008,8 @@ createApp({
       showProjDropdown, hideProjDropdown, filterDropdown, selectProjDropdown,
       openBranchLookup, selectBranchFill, fetchAllBranches,
       dismissReminder, exportAndDismiss, saveLaunchBranch, toggleSection, openMrUrl,
+      // v2：分支索引与关联
+      refreshBranchIndex, branchOtherIds, impactIds, triageBranchGroup, restoreBranchTriage, deriveRepoUrl,
       // Aliases for template
       searchQuery: computed({ get: () => state.searchQuery, set: v => { state.searchQuery = v.toLowerCase() } }),
       launchBranch: computed({ get: () => state.launchBranch, set: v => { state.launchBranch = v } }),
@@ -807,7 +1035,15 @@ createApp({
       branchModal: computed(() => state.branchModal),
       allBranchesModal: computed(() => state.allBranchesModal),
       ctxMenu: computed(() => state.ctxMenu),
-      projDropdown: computed(() => state.projDropdown)
+      projDropdown: computed(() => state.projDropdown),
+      // v2 别名
+      unregisteredGroups,
+      triagedGroups,
+      branchIndex: computed(() => state.branchIndex),
+      branchTriage: computed(() => state.branchTriage),
+      indexBusy: computed(() => state.indexBusy),
+      indexProgress: computed(() => state.indexProgress),
+      unregExpanded: computed({ get: () => state.unregExpanded, set: v => { state.unregExpanded = v } })
     }
   }
 }).mount('#app')
