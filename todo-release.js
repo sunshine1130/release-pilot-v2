@@ -102,6 +102,8 @@ createApp({
         excludeStatuses: ['已结束', '已上线'],
       },
       syncSettings: { visible: false, loading: false, error: '', spaces: [], types: [] },
+      // 备份到项目 backup/ 目录：列表、恢复与目录路径都由引擎给
+      backupDialog: { visible: false, loading: false, error: '', dir: '', files: [], pendingRestore: '' },
       syncDialog: { visible: false, loading: false, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: false },
       syncRaw: [],
       syncSelection: {},
@@ -327,6 +329,89 @@ createApp({
         document.body.appendChild(ta); ta.select()
         document.execCommand('copy'); document.body.removeChild(ta)
         toast('\u2713 ' + text)
+      }
+    }
+
+    // ===== 备份到项目目录（引擎写盘）=====
+    //
+    // 「导出」走浏览器下载，得自己挑目录、事后也想不起来存哪了；
+    // 备份固定写到项目下的 backup/，路径由引擎给出，换机器拷走整个文件夹即可。
+
+    /** 立刻备份一份到项目目录，返回引擎回执（含绝对路径） */
+    async function backupToProject() {
+      try {
+        const res = await fetch(apiUrl('/api/backup'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: getFullData() }),
+        })
+        const data = await res.json()
+        if (data.code) throw new Error(data.error || data.code)
+        state.backupDialog.dir = data.dir
+        toast(`已备份 ${data.items} 条到 ${data.name}`)
+        return data
+      } catch (e) {
+        toast(`备份失败：${e.message}（引擎没起或端口不对？）`)
+        return null
+      }
+    }
+
+    async function loadBackups() {
+      state.backupDialog.loading = true
+      state.backupDialog.error = ''
+      try {
+        const res = await fetch(apiUrl('/api/backup/list'))
+        const data = await res.json()
+        if (data.code) throw new Error(data.error || data.code)
+        state.backupDialog.dir = data.dir
+        state.backupDialog.files = data.files || []
+      } catch (e) {
+        state.backupDialog.error = `读取备份目录失败：${e.message}`
+      }
+      state.backupDialog.loading = false
+    }
+
+    function openBackupDialog() {
+      state.backupDialog.visible = true
+      state.backupDialog.pendingRestore = ''
+      loadBackups()
+    }
+
+    /** 恢复是一次覆盖性写入，所以要点两次：第一次只是把该行变成「确认恢复」 */
+    async function restoreBackup(file) {
+      if (state.backupDialog.pendingRestore !== file.name) {
+        state.backupDialog.pendingRestore = file.name
+        toast(`再点一次「确认恢复」会用 ${file.name} 覆盖当前数据`)
+        return
+      }
+      state.backupDialog.pendingRestore = ''
+      try {
+        const res = await fetch(apiUrl('/api/backup/read?name=' + encodeURIComponent(file.name)))
+        const data = await res.json()
+        if (data.code) throw new Error(data.error || data.code)
+        setFullData(data)
+        saveToLocalStorage()
+        localStorage.setItem('todo_launch_branch', state.launchBranch || '')
+        saveBranchCache()
+        state.editingIds = {}
+        state.addingItems = []
+        state.addingCounter = 0
+        state.editProjectIdx = -1
+        state.backupDialog.visible = false
+        toast(`已从 ${file.name} 恢复 ${state.items.length} 条需求`)
+      } catch (e) {
+        toast(`恢复失败：${e.message}`)
+      }
+    }
+
+    async function revealBackupDir() {
+      try {
+        const res = await fetch(apiUrl('/api/backup/reveal'), { method: 'POST' })
+        const data = await res.json()
+        if (data.code) throw new Error(data.error || data.code)
+        toast('已打开备份目录')
+      } catch (e) {
+        toast(`打开备份目录失败：${e.message}`)
       }
     }
 
@@ -817,8 +902,15 @@ createApp({
       localStorage.setItem('todo_last_remind_date', getTodayStr())
     }
 
-    function exportAndDismiss() {
-      exportToFile()
+    /**
+     * 提醒里的「导出保存」。
+     *
+     * 优先写进项目 backup/ 目录：这个入口就是为了「别丢」，而下载文件还要用户自己挑目录；
+     * 引擎没起（或备份失败）时退回原来的下载导出，保证这条路径永远能存下一份。
+     */
+    async function exportAndDismiss() {
+      const saved = await backupToProject()
+      if (!saved) exportToFile()
       dismissReminder()
     }
 
@@ -1596,6 +1688,7 @@ createApp({
       buildMrUrl, buildBranchUrl, formatReleaseTime, newId,
       statusLabel, statusClass,
       copyText, exportToFile, importFromFile,
+      backupToProject, openBackupDialog, loadBackups, restoreBackup, revealBackupDir,
       addProject, removeProject, saveProjectEdit,
       startAdding, saveAdding, startEdit, saveEdit, cancelEdit,
       changeStatus, releaseItem, confirmLaunch, releaseAllToDone,
@@ -1660,6 +1753,7 @@ createApp({
       meegleStatus: computed(() => state.meegleStatus),
       syncSettings: computed(() => state.syncSettings),
       syncDialog: computed(() => state.syncDialog),
+      backupDialog: computed(() => state.backupDialog),
       syncRaw: computed(() => state.syncRaw),
       syncSelection: computed(() => state.syncSelection),
       syncRows,

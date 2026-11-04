@@ -515,6 +515,69 @@ try {
   check('导入后需求数据仍在', (await page.locator('h1 .sub').textContent() || '').includes('共'))
   fs.unlinkSync(importPath)
 
+  // ===== 10b) 备份到项目 backup/ 目录（引擎写盘）=====
+  // 下载导出要用户自己挑目录、事后想不起存哪；备份固定落到项目下的 backup/，
+  // 所以这里必须验证「浏览器点一下 → 磁盘上真的多出一个文件」，而不是只看 toast。
+  const BACKUP_DIR = path.join(PROJECT_DIR, 'backup')
+  const listBackups = () => (fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).filter(n => n.endsWith('.json')) : [])
+  const before = listBackups()
+  const itemsBeforeBackup = Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0)
+
+  // 名字必须 exact：默认是子串匹配，「备份」会同时命中「备份记录」
+  await page.getByRole('button', { name: '备份', exact: true }).click()
+  await page.waitForTimeout(1200)
+  const created = listBackups().filter(n => !before.includes(n))
+  check('点备份在项目 backup 目录真的写出文件',
+    created.length === 1 && /^todoList-发版需求-\d{14}\.json$/.test(created[0]),
+    created.join(' , ') || `目录里没有新增文件（现有 ${before.length} 个）`)
+
+  const backupJson = created.length ? JSON.parse(fs.readFileSync(path.join(BACKUP_DIR, created[0]), 'utf8')) : null
+  check('备份内容与当前数据一致',
+    !!backupJson && Array.isArray(backupJson.items) && backupJson.items.length === itemsBeforeBackup,
+    backupJson ? `备份 ${backupJson.items.length} 条 / 页面 ${itemsBeforeBackup} 条` : '没读到备份文件')
+  check('备份里带上了 v2 的判断类字段',
+    !!backupJson && ['branchTriage', 'branchLinks', 'meegleConfig', 'indexConfig'].every(k => k in backupJson))
+  check('备份文件名不含分支索引（派生数据不备份）',
+    !!backupJson && !('branchIndex' in backupJson))
+
+  // 备份记录弹窗：列出文件、显示目录，并且恢复是「点两次」的覆盖性操作
+  await page.getByRole('button', { name: '备份记录' }).click()
+  const backupBox = page.locator('.backup-box')
+  await backupBox.locator('.backup-row').first().waitFor({ timeout: 20000 })
+  const dirText = ((await backupBox.locator('.backup-path code').textContent()) || '').trim()
+  check('备份弹窗显示具体目录', dirText.endsWith('backup') && dirText.includes('发版小助手-v2'), dirText)
+  check('备份弹窗列出刚写的备份',
+    (await backupBox.locator('.backup-row', { hasText: created[0] || '不存在' }).count()) === 1,
+    created[0] || '')
+  await backupBox.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-backup.png') })
+
+  // 先改数据（新增一条）再恢复，验证恢复真的把数据拉回备份时的样子
+  await backupBox.locator('.sync-footer .btn-outline', { hasText: '关闭' }).click()
+  await page.waitForTimeout(200)
+  await page.getByRole('button', { name: '+ 新增需求' }).click()
+  await page.getByPlaceholder('需求名称（必填）').fill('备份-恢复前多出来的一条')
+  await page.locator('tr.edit-row').getByRole('button', { name: '保存' }).first().click()
+  await page.waitForTimeout(500)
+  const itemsAfterAdd = Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0)
+  check('恢复前先造出数据差异', itemsAfterAdd === itemsBeforeBackup + 1, `${itemsBeforeBackup} → ${itemsAfterAdd}`)
+
+  await page.getByRole('button', { name: '备份记录' }).click()
+  await backupBox.locator('.backup-row', { hasText: created[0] }).getByRole('button', { name: '恢复' }).click()
+  await page.waitForTimeout(300)
+  check('恢复需要二次确认',
+    (await backupBox.locator('.backup-row', { hasText: created[0] }).getByRole('button', { name: '确认恢复' }).count()) === 1
+    && itemsAfterAdd === Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0))
+  await backupBox.locator('.backup-row', { hasText: created[0] }).getByRole('button', { name: '确认恢复' }).click()
+  await page.waitForTimeout(1000)
+  const itemsAfterRestore = Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0)
+  check('恢复把数据整份拉回备份时的状态',
+    itemsAfterRestore === itemsBeforeBackup && (await page.getByText('备份-恢复前多出来的一条').count()) === 0,
+    `${itemsAfterAdd} → ${itemsAfterRestore}（备份时 ${itemsBeforeBackup}）`)
+
+  // 验证过程写进 backup/ 的是测试数据（98 条假需求），跑完必须清掉，不能留在用户的备份目录里
+  for (const f of created) fs.unlinkSync(path.join(BACKUP_DIR, f))
+  check('验证产生的测试备份已清理', listBackups().length === before.length, `目录剩 ${listBackups().length} 个`)
+
   // ===== 11) v1 主路径回归（v2 要替换 v1，必须确认没碰坏老功能）=====
   await page.getByRole('button', { name: '+ 新增需求' }).click()
   await page.getByPlaceholder('需求名称（必填）').fill('回归-新增需求')

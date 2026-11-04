@@ -881,6 +881,109 @@ async function handleBranchIndex(req, res, query) {
   }
 }
 
+// ===== 本地备份 =====
+//
+// 需求数据只存在浏览器的 localStorage 里：清缓存、换浏览器、换机器就没了，
+// 「导出」还得自己挑目录。所以再提供一个把备份直接写进项目目录的通道 ——
+// 备份跟代码放在一起，拷走整个文件夹就带走了数据，同时列出/恢复也由引擎负责。
+
+const BACKUP_DIR = path.join(BASE_DIR, 'backup')
+const BACKUP_KEEP = 200
+
+function pad2(n) { return String(n).padStart(2, '0') }
+
+function backupFileName(now = new Date()) {
+  const ts = now.getFullYear() + pad2(now.getMonth() + 1) + pad2(now.getDate())
+    + pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds())
+  return `todoList-发版需求-${ts}.json`
+}
+
+/** 只接受本目录下的单个文件名，挡住 ../ 之类的路径穿越 */
+function resolveBackupPath(name) {
+  const base = path.basename(String(name || ''))
+  if (!base || base !== name || !/\.json$/i.test(base)) return null
+  const full = path.join(BACKUP_DIR, base)
+  if (!full.startsWith(BACKUP_DIR + path.sep)) return null
+  return full
+}
+
+async function handleBackupCreate(req, res) {
+  // 备份体比普通请求大得多（需求多、备注长），单给这一条放宽上限
+  const body = await readJsonBody(req, 32 * 1024 * 1024)
+  const data = body && body.data
+  if (!data || typeof data !== 'object' || !Array.isArray(data.items)) {
+    return fail(res, 'BAD_REQUEST', '备份内容必须是导出格式的 JSON（至少包含 items 数组）')
+  }
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true })
+    const name = backupFileName()
+    const full = path.join(BACKUP_DIR, name)
+    const text = JSON.stringify(data, null, 2)
+    fs.writeFileSync(full, text, 'utf8')
+    json(res, {
+      ok: true,
+      dir: BACKUP_DIR,
+      name,
+      file: full,
+      size: Buffer.byteLength(text),
+      items: data.items.length,
+      at: Date.now(),
+    })
+  } catch (err) {
+    fail(res, 'BACKUP_WRITE_FAILED', `写备份失败：${err.message}`, 500)
+  }
+}
+
+async function handleBackupList(req, res) {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) return json(res, { dir: BACKUP_DIR, files: [] })
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(n => /\.json$/i.test(n))
+      .map(n => {
+        const full = path.join(BACKUP_DIR, n)
+        const stat = fs.statSync(full)
+        let items = null
+        // 顺手把需求条数读出来：列表里只看「哪天备份的、多少条」就该能判断选哪份恢复
+        try { items = (JSON.parse(fs.readFileSync(full, 'utf8')).items || []).length } catch {}
+        return { name: n, size: stat.size, mtime: stat.mtimeMs, items }
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+    json(res, { dir: BACKUP_DIR, files })
+  } catch (err) {
+    fail(res, 'BACKUP_LIST_FAILED', `读取备份目录失败：${err.message}`, 500)
+  }
+}
+
+async function handleBackupRead(req, res, query) {
+  const full = resolveBackupPath(query.get('name'))
+  if (!full) return fail(res, 'BAD_REQUEST', 'name 必须是备份目录下的 .json 文件名')
+  try {
+    if (!fs.existsSync(full)) return fail(res, 'BACKUP_NOT_FOUND', '备份文件不存在', 404)
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(fs.readFileSync(full))
+  } catch (err) {
+    fail(res, 'BACKUP_READ_FAILED', `读取备份失败：${err.message}`, 500)
+  }
+}
+
+/** 在资源管理器里打开备份目录，省得用户照着手敲路径 */
+async function handleBackupReveal(req, res) {
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true })
+    if (process.platform === 'win32') {
+      // explorer 打开成功也常返回非 0，这里不判定退出码
+      execFile('explorer.exe', [BACKUP_DIR], () => {})
+    } else if (process.platform === 'darwin') {
+      execFile('open', [BACKUP_DIR], () => {})
+    } else {
+      execFile('xdg-open', [BACKUP_DIR], () => {})
+    }
+    json(res, { ok: true, dir: BACKUP_DIR })
+  } catch (err) {
+    fail(res, 'BACKUP_REVEAL_FAILED', `打开备份目录失败：${err.message}`, 500)
+  }
+}
+
 // ===== 路由表 =====
 
 const ROUTES = {
@@ -892,6 +995,10 @@ const ROUTES = {
   'GET /api/meegle/spaces': handleMeegleSpaces,
   'GET /api/meegle/types': handleMeegleTypes,
   'POST /api/meegle/query': handleMeegleQuery,
+  'POST /api/backup': handleBackupCreate,
+  'GET /api/backup/list': handleBackupList,
+  'GET /api/backup/read': handleBackupRead,
+  'POST /api/backup/reveal': handleBackupReveal,
 }
 
 const MIME_TYPES = {

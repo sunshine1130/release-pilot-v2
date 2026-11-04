@@ -1555,6 +1555,28 @@ input[data-role="syncProjectName"] {
   max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,0.18);
 }
 .sync-box-wide { width: 980px; }
+
+/* 备份弹窗：刻意不复用 .sync-box 类名 —— 验证脚本用 `.sync-box:not(.sync-box-wide)`
+   定位同步设置弹窗，多一个同族元素会让选择器歧义；这里只复用内部结构样式 */
+.backup-box {
+  background: var(--surface); border-radius: var(--radius-lg); width: 720px; max-width: 94vw;
+  max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+}
+.backup-path {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-secondary);
+}
+.backup-path code {
+  font-family: var(--mono); font-size: 11px; background: var(--surface-raised);
+  padding: 3px 8px; border-radius: var(--radius-sm); word-break: break-all; flex: 1;
+}
+.backup-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 6px;
+  border: 1px solid var(--border-light); border-radius: var(--radius-sm); background: var(--surface-raised);
+}
+.backup-row-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.backup-name { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.backup-meta { font-size: 11px; color: var(--text-muted); }
 .sync-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 18px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px;

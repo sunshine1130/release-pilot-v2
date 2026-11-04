@@ -513,14 +513,31 @@ kbd {
 </div>
 
 <!-- ===== 导入导出 ===== -->
-<h2>九、导入导出</h2>
+<h2>九、备份与导入导出</h2>
+
+<div class="card">
+  <h3>备份（推荐）</h3>
+  <p>数据平时只存在<strong>浏览器 localStorage</strong> 里，清缓存、换浏览器或换电脑就没了。
+  点顶部 <strong>"备份"</strong>，引擎会把一整份数据写进<strong>项目目录下的 <code>backup</code> 文件夹</strong>：</p>
+  <pre>D:\自研\发版小助手-v2\backup\todoList-发版需求-20261104134107.json</pre>
+  <ul>
+    <li>备份跟代码放在一起，拷走整个文件夹就带走了数据；<code>backup/</code> 已在 .gitignore 里，不会提交到仓库。</li>
+    <li>点 <strong>"备份记录"</strong> 可以看到目录里的历史备份（文件名、条数、大小、时间），并支持<strong>整份恢复</strong>
+      —— 恢复是覆盖性操作，所以要<strong>点两次</strong>（第一次变成"确认恢复"）。</li>
+    <li>弹窗里的 <strong>"打开目录"</strong> 会直接在资源管理器里打开备份文件夹。</li>
+    <li>每日提醒里的按钮现在也是<strong>备份保存</strong>：优先写进这个目录，引擎没起时才退回下载导出。</li>
+  </ul>
+  <p class="note">这样做的前提是引擎在跑（它负责写盘）。备份里<strong>不含分支索引</strong>：那是能从 git 重算的派生数据，
+  恢复后点一下"刷新分支索引"即可。</p>
+</div>
 
 <div class="card">
   <h3>导出</h3>
   <ul>
     <li>点击顶部 <strong>"导出"</strong> 按钮。</li>
     <li>生成 JSON 文件：<code>todoList-发版需求-时间戳.json</code></li>
-    <li>包含完整数据：项目列表、需求列表、分支缓存、上线分支设置。</li>
+    <li>包含完整数据：项目列表、需求列表、分支缓存、上线分支设置，以及 v2 的分支处置与同步配置。</li>
+    <li>适合发给别人、或存到项目目录以外的地方。</li>
   </ul>
 </div>
 
@@ -530,6 +547,7 @@ kbd {
     <li>点击顶部 <strong>"导入"</strong> 按钮，选择之前导出的 JSON 文件。</li>
     <li>导入会<strong>覆盖</strong>当前所有数据并自动保存。</li>
     <li>导入后自动清除编辑状态和新增行。</li>
+    <li>旧版本（v1）导出的文件缺少 v2 新增字段时<strong>不会清空</strong>你现有的分支处置与同步配置。</li>
   </ul>
 </div>
 
@@ -537,7 +555,7 @@ kbd {
   <h3>每日备份提醒</h3>
   <p>每天首次打开页面时，弹出备份提醒窗口：</p>
   <ul>
-    <li>"导出保存" — 自动导出 JSON 文件并关闭提醒</li>
+    <li>"备份保存" — 备份到项目 <code>backup/</code> 目录并关闭提醒</li>
     <li>"暂不保存" — 关闭提醒（下次打开不再弹出当天）</li>
   </ul>
 </div>

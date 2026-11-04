@@ -32,11 +32,12 @@ meegle auth login --host project.feishu.cn
 ```
 todo-release.html / .js / .css   页面、逻辑、样式（Vue 3 全局构建，无构建步骤）
 vue.global.js                    Vue 3 运行库
-server.js                        本地服务：静态页面 + 分支/飞书项目接口
+server.js                        本地服务：静态页面 + 分支/飞书项目/备份接口
 start-server.bat                 启动入口
 使用说明.html                     面向使用者的文档
 docs/                            技术方案与接口/算法/数据模型/实现设计文档
 scripts/ui-verify.mjs            Playwright 真实浏览器验证脚本
+backup/                          「备份」按钮写出的数据备份（.gitignore 已排除，不提交）
 ```
 
 ## 文档
@@ -53,7 +54,7 @@ scripts/ui-verify.mjs            Playwright 真实浏览器验证脚本
 
 ```bash
 node server.js                       # 另开一个终端
-node scripts/ui-verify.mjs           # 真实浏览器跑 32 项断言
+node scripts/ui-verify.mjs           # 真实浏览器跑 99 项断言（含引擎级安全回归与备份落盘往返）
 ```
 
 覆盖：页面渲染、端口跟随、分支索引、未登记分支处置与持久化、影响面提示、飞书同步（真实调用 CLI）、按需求ID去重、导出/导入往返、以及 v1 主路径回归。
