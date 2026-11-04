@@ -30,6 +30,7 @@ const LS_BRANCH_INDEX = 'todo_branch_index'
 const LS_BRANCH_LINKS = 'todo_branch_links'
 const LS_BRANCH_TRIAGE = 'todo_branch_triage'
 const LS_MEEGLE_CONFIG = 'todo_meegle_config'
+const LS_INDEX_CONFIG = 'todo_index_config'
 /** 索引 TTL：分支一直在长，实测同一条分支两天内需求覆盖就会变，不能无限期复用 */
 const INDEX_TTL_MS = 10 * 60 * 1000
 
@@ -90,7 +91,9 @@ createApp({
       syncSettings: { visible: false, loading: false, error: '', spaces: [], types: [] },
       syncDialog: { visible: false, loading: false, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: true },
       syncRaw: [],
-      syncSelection: {}
+      syncSelection: {},
+      // 分支索引只保留自己创建的分支：同事的分支混进未登记列表与匹配结果纯是噪声
+      indexConfig: { onlyMine: true }
     })
 
     // ===== Sections (computed) =====
@@ -239,6 +242,7 @@ createApp({
         branchTriage: state.branchTriage,
         branchLinks: state.branchLinks,
         meegleConfig: state.meegleConfig,
+        indexConfig: state.indexConfig,
       }
     }
 
@@ -252,6 +256,9 @@ createApp({
       if (data && data.branchLinks && typeof data.branchLinks === 'object') state.branchLinks = data.branchLinks
       if (data && data.meegleConfig && typeof data.meegleConfig === 'object') {
         state.meegleConfig = { ...state.meegleConfig, ...data.meegleConfig }
+      }
+      if (data && data.indexConfig && typeof data.indexConfig === 'object') {
+        state.indexConfig = { ...state.indexConfig, ...data.indexConfig }
       }
       // 导入/加载后立即落盘，否则刷新一次这些新字段就丢了
       saveBranchTriage()
@@ -839,6 +846,17 @@ createApp({
       try { localStorage.setItem(LS_BRANCH_TRIAGE, JSON.stringify(state.branchTriage)) } catch {}
     }
 
+    function saveIndexConfig() {
+      try { localStorage.setItem(LS_INDEX_CONFIG, JSON.stringify(state.indexConfig)) } catch {}
+    }
+
+    /** 切换「只看我的分支」后必须重算一次，否则界面上还是旧口径的结果 */
+    function setOnlyMine(val) {
+      state.indexConfig.onlyMine = !!val
+      saveIndexConfig()
+      refreshBranchIndex(true)
+    }
+
     /** 缺 timestamp 一律视为过期：历史脏数据不能被当成新鲜结果继续用 */
     function indexStale(entry) {
       return !entry || !entry.timestamp || (Date.now() - entry.timestamp) > INDEX_TTL_MS
@@ -868,19 +886,27 @@ createApp({
 
       for (const p of targets) {
         try {
-          const query = `?path=${encodeURIComponent(p.localPath)}&repo=${encodeURIComponent(deriveRepoUrl(p.mr))}${force ? '&refresh=1' : ''}`
+          const onlyMine = state.indexConfig.onlyMine !== false
+          const query = `?path=${encodeURIComponent(p.localPath)}&repo=${encodeURIComponent(deriveRepoUrl(p.mr))}`
+            + `&onlyMine=${onlyMine ? '1' : '0'}${force ? '&refresh=1' : ''}`
           const res = await fetch(apiUrl('/api/git/branch-index') + query)
           const data = await res.json()
           if (data.code) throw new Error(data.error || data.code)
 
           const branches = {}
           for (const b of data.branches) {
-            branches[b.name] = { ids: b.ids, commits: b.commits, lastDate: b.lastDate, merged: b.merged, skipped: b.skipped }
+            branches[b.name] = {
+              ids: b.ids, commits: b.commits, lastDate: b.lastDate,
+              merged: b.merged, skipped: b.skipped, owner: b.owner || '',
+            }
           }
           state.branchIndex[p.name] = {
             base: data.base,
             branches,
             unregistered: (data.unregistered || []).map(u => u.name),
+            unregisteredOwners: Object.fromEntries((data.unregistered || []).map(u => [u.name, u.owner || ''])),
+            onlyMine: !!data.onlyMine,
+            notMine: data.notMine || 0,
             remoteFiltered: !!data.remoteFiltered,
             remoteOnly: data.remoteOnly || [],
             timestamp: Date.now()
@@ -932,6 +958,10 @@ createApp({
       return branchOtherIds(projectName, branchName, selfWorkItemId(item))
     }
 
+    /** 因「不是自己创建」被过滤掉的分支总数，用于在界面上说明当前口径 */
+    const indexNotMineTotal = computed(() =>
+      Object.values(state.branchIndex).reduce((n, e) => n + (e.notMine || 0), 0))
+
     /**
      * 未登记分支：有独占提交、但反查不到任何需求ID。
      * 发版时最容易漏掉的就是这些 —— 需求还没出、或者一堆优化都做在一个分支里。
@@ -971,8 +1001,7 @@ createApp({
       toast('已恢复提示')
     }
 
-    /** 已处置的分支（折叠区展示 + 可恢复） */
-    const triagedGroups = computed(() => {
+    /** 已处置的分支（折叠区展示 + 可恢复） */    const triagedGroups = computed(() => {
       const byName = new Map()
       for (const [key, rec] of Object.entries(state.branchTriage)) {
         const parts = key.split('\u0000')
@@ -1386,6 +1415,10 @@ createApp({
       try { state.branchLinks = JSON.parse(localStorage.getItem(LS_BRANCH_LINKS)) || {} } catch { state.branchLinks = {} }
       try { state.branchTriage = JSON.parse(localStorage.getItem(LS_BRANCH_TRIAGE)) || {} } catch { state.branchTriage = {} }
       try {
+        const ic = JSON.parse(localStorage.getItem(LS_INDEX_CONFIG))
+        if (ic && typeof ic === 'object') state.indexConfig = { ...state.indexConfig, ...ic }
+      } catch {}
+      try {
         const cfg = JSON.parse(localStorage.getItem(LS_MEEGLE_CONFIG))
         if (cfg && typeof cfg === 'object') state.meegleConfig = { ...state.meegleConfig, ...cfg }
         // 旧默认模板没有 {statusFilter} 占位符，直接用会让「排除已完成状态」静默失效，
@@ -1437,6 +1470,7 @@ createApp({
       dismissReminder, exportAndDismiss, saveLaunchBranch, toggleSection, openMrUrl,
       // v2：分支索引与关联
       refreshBranchIndex, branchOtherIds, impactIds, triageBranchGroup, restoreBranchTriage, deriveRepoUrl,
+      setOnlyMine,
       // v2：飞书项目同步
       openSyncSettings, openSyncDialog, selectSpace, toggleType, saveSyncSettings, loadTypes,
       fetchMeegleItems, toggleSyncRow, selectAllNew, applySync, matchesOf, pickPrimaryMatches,
@@ -1475,6 +1509,8 @@ createApp({
       indexBusy: computed(() => state.indexBusy),
       indexProgress: computed(() => state.indexProgress),
       unregExpanded: computed({ get: () => state.unregExpanded, set: v => { state.unregExpanded = v } }),
+      indexConfig: computed(() => state.indexConfig),
+      indexNotMineTotal,
       // v2 飞书同步别名
       meegleConfig: computed(() => state.meegleConfig),
       meegleStatus: computed(() => state.meegleStatus),

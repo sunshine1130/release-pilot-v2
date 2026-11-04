@@ -37,6 +37,9 @@
       <label class="btn btn-outline btn-sm" style="cursor:pointer">导入 <input type="file" accept=".json" style="display:none" @change="importFromFile" /></label>
       <button class="btn btn-warning btn-sm" @click="fetchAllBranches">获取分支</button>
       <button class="btn btn-info btn-sm" :disabled="indexBusy" @click="refreshBranchIndex(true)">{{indexBusy?'刷新中...':'刷新分支索引'}}</button>
+      <label class="header-check" title="只分析你创建的分支（按分支首个独占提交的作者判定）。关闭后会包含同事的分支。">
+        <input type="checkbox" :checked="indexConfig.onlyMine" @change="setOnlyMine($event.target.checked)"> 只看我的分支
+      </label>
       <button class="btn btn-purple btn-sm" @click="openSyncDialog">同步飞书项目</button>
       <button class="btn btn-outline btn-sm" @click="openSyncSettings">同步设置</button>
       <button class="btn btn-primary" @click="startAdding">+ 新增需求</button>
@@ -117,6 +120,9 @@
         <span class="hint" v-if="unregisteredGroups.length">有 {{unregisteredGroups.length}} 条分支查不到需求登记，确认是否需要一起发版</span>
         <span class="hint" v-else-if="Object.keys(branchIndex).length">没有未登记分支</span>
         <span class="hint" v-else>尚未刷新分支索引</span>
+        <span class="hint" v-if="Object.keys(branchIndex).length">
+          {{indexConfig.onlyMine ? '仅我创建的分支' : '包含他人分支'}}<template v-if="indexNotMineTotal">，已过滤 {{indexNotMineTotal}} 条他人分支</template>
+        </span>
       </div>
       <div class="collapse-body" :class="{expanded:unregExpanded}">
         <div v-if="!Object.keys(branchIndex).length" class="unreg-hint">

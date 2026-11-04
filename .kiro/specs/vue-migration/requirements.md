@@ -297,8 +297,10 @@
 2. WHEN 本地存在克隆，THE The_App SHALL 同时保留原有本地分支通道（含作者与日期），两条通道并存互不替代。
 3. THE The_App SHALL 过滤环境与临时分支（如 `dev`、`uat`、`test`、`master_launched`、`mdmdev`、`mdmuat`、`mdmtest`、`*_old`、`*_copy`、`copy分支`、`复制分支`）。
 4. WHERE 项目配置了本地路径，THE The_App SHALL 以远端真实分支列表与本地 ref 取交集，滤除远端已删除的陈旧分支。
-5. WHEN 服务端口与默认端口不一致，THE The_App SHALL 读取服务写入的端口文件并连到实际端口，不得静默把请求打到其他进程。
-6. IF 远端不可达，THEN THE The_App SHALL 记录错误并降级为纯本地分析，而不是让整个索引失败。
+5. WHERE 用户未关闭「只看我的分支」，THE The_App SHALL 只保留由当前提交身份创建的分支，创建者按该分支**首个独占提交的作者**判定。
+6. IF 无法取得当前提交身份，THEN THE The_App SHALL 不做创建者过滤并如实回传未过滤，而不是把所有分支判为他人分支而清空索引。
+7. WHEN 服务端口与默认端口不一致，THE The_App SHALL 读取服务写入的端口文件并连到实际端口，不得静默把请求打到其他进程。
+8. IF 远端不可达，THEN THE The_App SHALL 记录错误并降级为纯本地分析，而不是让整个索引失败。
 
 ### Requirement 22: 需求与分支的自动关联
 

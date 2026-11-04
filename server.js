@@ -509,7 +509,42 @@ async function listRemoteBranches(repo, match) {
  *      全算进来，实测一条分支能冒出 9 个别人的需求ID。
  *   4. 独占提交为 0 说明已完全并入主线，不参与关联（否则会把历史分支全捞出来）。
  */
-async function computeBranchIndex(cwd, base, maxCommits, maxBranches, remoteNames) {
+/**
+ * 取当前仓库的提交身份（user.name / user.email）。
+ *
+ * 用来判断一条分支是不是「我创建的」——同事的分支混进未登记列表和匹配结果里纯是噪声：
+ * 实测 auth-web 的 6 条活跃分支全部属于钱龙 / licheng / Liujiangbei，而
+ * ops-web / pms-web / scm-web / aps-web 的分支清一色是自己。
+ */
+async function gitIdentity(cwd) {
+  const cacheKey = `identity:${cwd}`
+  const hit = cacheGet(cacheKey, 6 * 60 * 60 * 1000)
+  if (hit) return hit
+  const id = { name: '', email: '' }
+  try {
+    id.name = (await runGit(['config', 'user.name'], cwd)).trim()
+  } catch {}
+  try {
+    id.email = (await runGit(['config', 'user.email'], cwd)).trim()
+  } catch {}
+  cacheSet(cacheKey, id)
+  return id
+}
+
+/**
+ * 判定分支的创建者。
+ *
+ * 取该分支独占提交里**最早的一条**（最靠近分叉点）的作者，而不是「提交最多的人」：
+ * 分支的起点作者才是创建者；别人建的分支上我后来补过几个提交，不该整条算成我的。
+ */
+function isMineBy(entry, me) {
+  if (!entry) return false
+  if (me.name && entry.author === me.name) return true
+  if (me.email && entry.email === me.email) return true
+  return false
+}
+
+async function computeBranchIndex(cwd, base, maxCommits, maxBranches, remoteNames, onlyMine) {
   if (!fs.existsSync(cwd)) throw { code: 'GIT_PATH_MISSING', message: `本地路径不存在：${cwd}` }
   if (!fs.existsSync(path.join(cwd, '.git'))) throw { code: 'GIT_NOT_REPO', message: `不是 git 仓库：${cwd}` }
 
@@ -519,6 +554,11 @@ async function computeBranchIndex(cwd, base, maxCommits, maxBranches, remoteName
   } catch {
     throw { code: 'GIT_BASE_MISSING', message: `仓库中没有 ${baseRef}，请确认发布主线名称` }
   }
+
+  // 只筛自己的分支时先取身份。拿不到身份就**不筛** —— 否则会把所有分支都判成
+  // 「不是我的」而静默清空整个索引，比不筛危险得多。
+  const me = onlyMine ? await gitIdentity(cwd) : null
+  const filterByMine = !!(me && (me.name || me.email))
 
   // 只需要分支名、完整 ref 和 tip 的日期（日期顺手取出来，省掉每分支一次 git log -1）
   const refsOut = await runGit(
@@ -549,6 +589,7 @@ async function computeBranchIndex(cwd, base, maxCommits, maxBranches, remoteName
   const branches = []
   const unregistered = []
   let scanned = 0
+  let notMine = 0
 
   for (const [name, info] of refByName) {
     if (scanned >= maxBranches) break
@@ -567,32 +608,52 @@ async function computeBranchIndex(cwd, base, maxCommits, maxBranches, remoteName
     // 也不会把「刚好等于上限」的分支误判为超限。
     let out
     try {
+      // 顺带带上作者：与取提交标题同一次调用，不额外增加进程开销
       out = await runGit(
-        ['log', '--first-parent', '-n', String(maxCommits + 1), '--format=%s', `${baseRef}..${ref}`],
+        ['log', '--first-parent', '-n', String(maxCommits + 1), '--format=%an|%ae|%s', `${baseRef}..${ref}`],
         cwd,
       )
     } catch {
       continue // ref 已删除或不可解析 —— 跳过该分支，不算错误
     }
 
-    const lines = out.split('\n').filter(Boolean)
+    // git log 默认由新到旧，所以数组最后一条就是分支最早的独占提交
+    const entries = []
+    for (const line of out.split('\n')) {
+      if (!line) continue
+      const i1 = line.indexOf('|')
+      const i2 = line.indexOf('|', i1 + 1)
+      if (i1 < 0 || i2 < 0) continue
+      entries.push({ author: line.slice(0, i1), email: line.slice(i1 + 1, i2), subject: line.slice(i2 + 1) })
+    }
 
-    if (lines.length === 0) {
+    if (entries.length === 0) {
       // 相对发布主线没有任何独占提交 = 改动已全部进入主线，不参与关联
-      branches.push({ name, ids: [], commits: 0, lastDate, merged: true, skipped: false })
+      branches.push({ name, ids: [], commits: 0, lastDate, merged: true, skipped: false, mine: null, owner: '' })
       continue
     }
 
-    if (lines.length > maxCommits) {
+    if (entries.length > maxCommits) {
       // commits 留 null 是有意的：这里根本没数完，报一个数字会是编造的。
       // 前端据此显示「未分析」，与「确实没有需求ID」区分开。
-      branches.push({ name, ids: [], commits: null, lastDate, merged: false, skipped: true })
+      branches.push({ name, ids: [], commits: null, lastDate, merged: false, skipped: true, mine: null, owner: '' })
       continue
     }
 
-    const ids = extractReqIds(out)
-    branches.push({ name, ids, commits: lines.length, lastDate, merged: false, skipped: false })
-    if (ids.length === 0) unregistered.push({ name, commits: lines.length, lastDate })
+    const creator = entries[entries.length - 1]
+    const mine = filterByMine ? isMineBy(creator, me) : null
+    if (filterByMine && !mine) {
+      notMine++
+      continue
+    }
+
+    const ids = extractReqIds(entries.map(e => e.subject).join('\n'))
+    const entry = {
+      name, ids, commits: entries.length, lastDate, merged: false, skipped: false,
+      mine, owner: creator.author || '',
+    }
+    branches.push(entry)
+    if (ids.length === 0) unregistered.push({ name, commits: entries.length, lastDate, owner: entry.owner })
   }
 
   branches.sort((a, b) => (b.lastDate || '').localeCompare(a.lastDate || ''))
@@ -609,6 +670,8 @@ async function computeBranchIndex(cwd, base, maxCommits, maxBranches, remoteName
     unregistered,
     scanned,
     total: refByName.size,
+    onlyMine: filterByMine,
+    notMine, // 因「不是自己创建」被过滤掉的分支数
     localOnly, // 被远端列表过滤掉的本地 ref 条数（含 refs/heads 与 refs/remotes 的重复项，仅作诊断用）
     remoteOnly, // 远端有、本地没有的分支名
   }
@@ -736,9 +799,11 @@ async function handleBranchIndex(req, res, query) {
   const base = query.get('base') || 'master'
   const maxCommits = Number(query.get('maxCommits')) || DEFAULT_MAX_COMMITS
   const maxBranches = Number(query.get('maxBranches')) || DEFAULT_MAX_BRANCHES
+  // 默认只保留自己创建的分支：同事的分支混进来只会污染未登记列表与匹配结果
+  const onlyMine = query.get('onlyMine') !== '0'
   const force = query.get('refresh') === '1'
-  // repo 必须进缓存键：带远端过滤与不带的结果不同，两者不能互相命中
-  const cacheKey = `index:${fullPath}:${base}:${maxCommits}:${repo || ''}`
+  // repo 与 onlyMine 都必须进缓存键：它们不同则结果不同，不能互相命中
+  const cacheKey = `index:${fullPath}:${base}:${maxCommits}:${repo || ''}:${onlyMine ? 'mine' : 'all'}`
   const started = Date.now()
 
   if (!force) {
@@ -757,7 +822,7 @@ async function handleBranchIndex(req, res, query) {
       }
     }
 
-    const result = await computeBranchIndex(fullPath, base, maxCommits, maxBranches, remoteNames)
+    const result = await computeBranchIndex(fullPath, base, maxCommits, maxBranches, remoteNames, onlyMine)
     const payload = {
       path: fullPath,
       repo: repo || '',

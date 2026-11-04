@@ -407,6 +407,43 @@ try {
   const matched = ((await previewBox.locator('.sync-branch').first().textContent()) || '').trim()
   check('配置 pms-web 后 7134246577 能匹配到分支', /pms-web/.test(matched), matched)
   check('配置齐全时不再显示前置条件提示', (await previewBox.locator('.sync-note').count()) === 0)
+  await previewBox.locator('.sync-header .btn-close').click()
+  await page.waitForTimeout(200)
+
+  // ===== 13) 分支索引只保留自己创建的分支 =====
+  // 用 auth-web 做试金石：它当前的非主线分支全部属于钱龙 / licheng / Liujiangbei，
+  // 而 ops-web / pms-web / scm-web 的分支清一色是自己 —— 拿它才能验证过滤真的生效。
+  await page.evaluate(() => {
+    const t = new Date()
+    const d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+    localStorage.setItem('todo_last_remind_date', d)
+    localStorage.setItem('todo_project_names', JSON.stringify([
+      { name: 'auth-web', mr: 'https://git.joyintoy.cn/joyin/auth-web', localPath: 'C:\\项目\\auth-web' },
+    ]))
+    localStorage.setItem('todo_branch_index', '{}')
+    localStorage.setItem('todo_branch_triage', '{}')
+    localStorage.setItem('todo_index_config', JSON.stringify({ onlyMine: true }))
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(500)
+
+  await page.getByRole('button', { name: '刷新分支索引' }).click()
+  const scopeHint = page.locator('.unreg-panel .hint', { hasText: '仅我创建的分支' })
+  await scopeHint.waitFor({ timeout: 240000 })
+  const scopeText = ((await scopeHint.textContent()) || '').trim()
+  check('索引默认只保留我创建的分支', /已过滤 \d+ 条他人分支/.test(scopeText), scopeText)
+  check('他人分支不再进入未登记列表',
+    (await page.locator('.unreg-card').count()) === 0,
+    `${await page.locator('.unreg-card').count()} 张卡片`)
+
+  await page.locator('.header-check input').uncheck()
+  // 必须等重算的**结果**出现，不能等提示文案 —— 文案只是回显配置，勾选一改就立即翻转，
+  // 此时索引还在重算，直接数卡片必然得到旧口径的 0（这里踩过一次）
+  await page.locator('.unreg-card').first().waitFor({ timeout: 240000 })
+  check('关闭开关后纳入他人分支', (await page.locator('.unreg-card').count()) > 0,
+    `${await page.locator('.unreg-card').count()} 张卡片`)
+  check('界面标注已切换为包含他人分支',
+    (await page.locator('.unreg-panel .hint', { hasText: '包含他人分支' }).count()) > 0)
 
   check('无 JS 未捕获异常', jsErrors.length === 0, jsErrors.slice(0, 3).join(' | '))
 
