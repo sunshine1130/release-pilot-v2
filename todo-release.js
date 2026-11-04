@@ -77,6 +77,7 @@ createApp({
       // 未登记分支面板默认收起：它是「需要你确认的例外」，不是每天都要看的主线内容；
       // 折叠时标题上仍会显示条数，不会漏。
       unregExpanded: false,
+      unregKeyword: '',
 
       // ↓↓↓ v2 新增：飞书项目同步 ↓↓↓
       meegleStatus: { authenticated: null, host: '', error: '' },
@@ -1005,7 +1006,8 @@ createApp({
       toast('已恢复提示')
     }
 
-    /** 已处置的分支（折叠区展示 + 可恢复） */    const triagedGroups = computed(() => {
+    /** 已处置的分支（折叠区展示 + 可恢复） */
+    const triagedGroups = computed(() => {
       const byName = new Map()
       for (const [key, rec] of Object.entries(state.branchTriage)) {
         const parts = key.split('\u0000')
@@ -1016,6 +1018,21 @@ createApp({
       }
       return [...byName.values()]
     })
+
+    /**
+     * 未登记分支的筛选：分支名与项目名都参与匹配。
+     * 未登记分支往往有几十条、横跨多个仓库，按项目名找「某仓库还剩哪些没登记」比翻分支名快。
+     */
+    function matchUnregKeyword(name, projects) {
+      const kw = state.unregKeyword.trim().toLowerCase()
+      if (!kw) return true
+      return name.toLowerCase().includes(kw) || projects.some(p => (p || '').toLowerCase().includes(kw))
+    }
+    const filteredUnregGroups = computed(() =>
+      unregisteredGroups.value.filter(g => matchUnregKeyword(g.name, g.projects.map(p => p.project))))
+    // 已处置区也一起过滤：否则搜一个已处置的分支会「什么都没搜到」，还得自己去折叠区翻
+    const filteredTriagedGroups = computed(() =>
+      triagedGroups.value.filter(g => matchUnregKeyword(g.name, g.entries.map(e => e.project))))
 
     // ===== v2：飞书项目需求同步 =====
     //
@@ -1514,11 +1531,14 @@ createApp({
       // v2 别名
       unregisteredGroups,
       triagedGroups,
+      filteredUnregGroups,
+      filteredTriagedGroups,
       branchIndex: computed(() => state.branchIndex),
       branchTriage: computed(() => state.branchTriage),
       indexBusy: computed(() => state.indexBusy),
       indexProgress: computed(() => state.indexProgress),
       unregExpanded: computed({ get: () => state.unregExpanded, set: v => { state.unregExpanded = v } }),
+      unregKeyword: computed({ get: () => state.unregKeyword, set: v => { state.unregKeyword = v } }),
       indexConfig: computed(() => state.indexConfig),
       indexNotMineTotal,
       // v2 飞书同步别名

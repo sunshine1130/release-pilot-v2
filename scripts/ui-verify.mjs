@@ -171,6 +171,38 @@ try {
   check('未登记分支区出现 target 分支', (await page.getByText('feat/mdm二期分支').count()) > 0)
   check('未登记分支带项目标签', (await page.getByText(/ops-web · \d+/).count()) > 0)
 
+  // 3b) 未登记分支搜索：分支名与项目名都能匹配，无命中时给明确空态（而不是「暂无未登记分支」）
+  const unregSearch = page.locator('.unreg-panel .unreg-toolbar input')
+  const unregCards = page.locator('.unreg-card')
+  const totalUnreg = await unregCards.count()
+  check('未登记分支提供搜索框', (await unregSearch.count()) === 1)
+  await unregSearch.fill('mdm二期')
+  await page.waitForTimeout(300)
+  check('按分支名筛选',
+    (await unregCards.count()) === 1 && (await unregSearch.inputValue()) === 'mdm二期',
+    `命中 ${await unregCards.count()} 张 / 共 ${totalUnreg}`)
+  check('搜索命中数在面板上可见',
+    (await page.locator('.unreg-toolbar .hint').textContent() || '').includes(`1/${totalUnreg}`))
+  await page.locator('.unreg-panel').screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-unreg-search.png') })
+
+  await unregSearch.fill('ops-web')
+  await page.waitForTimeout(300)
+  const byProject = await unregCards.count()
+  const allOpsOnly = await unregCards.evaluateAll(els =>
+    els.every(el => [...el.querySelectorAll('.project-tag')].some(t => t.textContent.includes('ops-web'))))
+  check('按项目名筛选', byProject > 0 && allOpsOnly, `命中 ${byProject} 张，且都含 ops-web 标签`)
+
+  await unregSearch.fill('zzz-不存在的分支')
+  await page.waitForTimeout(300)
+  check('无命中时给出明确空态',
+    (await unregCards.count()) === 0 && (await page.getByText('没有匹配的分支').count()) > 0)
+  check('无命中时不误报「暂无未登记分支」',
+    (await page.getByText('暂无未登记分支').count()) === 0)
+
+  await unregSearch.fill('')
+  await page.waitForTimeout(300)
+  check('清空搜索后恢复全量', (await unregCards.count()) === totalUnreg, `恢复为 ${totalUnreg} 张`)
+
   // 4) 影响面提示：期望值从实际索引算，不能写死。
   //    这条分支仍在长（实测 10-29 是 4 个ID、11-03 已经 6 个），写死数字必然过几天就红
   const expectedOthers = await page.evaluate(() => {
@@ -389,7 +421,8 @@ try {
   const filtered = await page.locator('tr', { hasText: 'UI验证-销售预测' }).count()
   const hidden = await page.locator('tr', { hasText: 'UI验证-老数据形态' }).count()
   check('v1 搜索过滤', filtered > 0 && hidden === 0, `命中 ${filtered}，被过滤 ${hidden}`)
-  await page.locator('.search-clear').click()
+  // 未登记分支面板现在也有一个同名清空按钮，必须限定在页头搜索框里
+  await page.locator('.header-actions .search-clear').click()
 
   // 每日提醒：清掉当天标记后刷新，应重新弹出
   await page.evaluate(() => localStorage.removeItem('todo_last_remind_date'))

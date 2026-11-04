@@ -130,7 +130,15 @@
           <br>（需要项目同时配置了 MR 地址与本地路径 —— 反查要用本地提交历史）
         </div>
         <template v-else>
-          <div v-for="g in unregisteredGroups" :key="g.name" class="unreg-card">
+          <div class="unreg-toolbar">
+            <div class="search-wrap">
+              <span class="search-icon">🔍</span>
+              <input v-model="unregKeyword" placeholder="按分支名或项目名筛选..." />
+              <button class="search-clear" :style="{display:unregKeyword?'block':'none'}" @click="unregKeyword=''">&times;</button>
+            </div>
+            <span class="hint" v-if="unregKeyword.trim()">匹配 {{filteredUnregGroups.length}}/{{unregisteredGroups.length}} 条</span>
+          </div>
+          <div v-for="g in filteredUnregGroups" :key="g.name" class="unreg-card">
             <div class="unreg-main">
               <span class="unreg-name" :title="g.name">{{g.name}}</span>
               <span class="unreg-meta">{{g.projects.length}} 个项目 · 共 {{g.totalCommits}} 个提交 · 最近 {{g.lastDate||'-'}}</span>
@@ -144,9 +152,10 @@
             </div>
           </div>
           <div v-if="!unregisteredGroups.length" class="empty-state" style="padding:10px 0">暂无未登记分支</div>
-          <div v-if="triagedGroups.length" class="unreg-restore">
-            已处置 {{triagedGroups.length}} 条：
-            <span v-for="g in triagedGroups" :key="g.name" class="unreg-restore-item">
+          <div v-else-if="!filteredUnregGroups.length" class="empty-state" style="padding:10px 0">没有匹配的分支</div>
+          <div v-if="filteredTriagedGroups.length" class="unreg-restore">
+            已处置 {{filteredTriagedGroups.length}} 条：
+            <span v-for="g in filteredTriagedGroups" :key="g.name" class="unreg-restore-item">
               {{g.name}}<span class="unreg-restore-action">（{{g.action==='exempt'?'无需需求':'已忽略'}}）</span>
               <a href="#" @click.prevent="restoreBranchTriage(g)">恢复</a>
             </span>
