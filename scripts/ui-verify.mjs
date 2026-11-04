@@ -76,6 +76,15 @@ const SEED_ITEMS = [
     syncBranches: [],
   },
   {
+    // 这条不手工挂分支，只靠需求ID（从链接里提）等索引自动匹配 —— 验证「自动匹配」建议
+    id: 'uitest4',
+    name: 'UI验证-待挂分支',
+    link: 'https://project.feishu.cn/xxx/story/detail/6984365400',
+    status: 'pending',
+    projects: [],
+    syncBranches: [],
+  },
+  {
     // 这条的需求ID 落在飞书 oms 类型第一页，用来验证「已导入」标记
     id: 'uitest3',
     name: 'UI验证-已导入需求',
@@ -214,6 +223,41 @@ try {
   check('影响面提示数量正确（两条需求都命中）',
     expectedOthers > 0 && impacts.length === 2 && impacts.every(t => new RegExp(`还覆盖 ${expectedOthers} 个需求`).test(t)),
     `期望 ${expectedOthers}，实际：${impacts.map(t => t.trim()).join(' / ')}`)
+
+  // 4b) 自动匹配建议：索引里查到、但需求没手工挂的分支必须在行上可见。
+  //     否则「有ID、但ID不挂在这条需求上」的融合分支在页面上会彻底消失 ——
+  //     它既进不了未登记分支（有ID），也不出现在任何需求行。
+  const row4 = page.locator('tr', { hasText: 'UI验证-待挂分支' })
+  const chips = row4.locator('.branch-suggest')
+  await chips.first().waitFor({ timeout: 30000 })
+  const chipText = (await chips.first().textContent() || '').trim()
+  check('需求行显示自动匹配的建议分支',
+    chipText.includes('ops-web') && chipText.includes('feat/ops四需求合并分支'), chipText)
+  check('已手工挂过的分支不再重复建议',
+    (await page.locator('tr', { hasText: 'UI验证-销售预测' }).locator('.branch-suggest').count()) === 0)
+  // 截图前先把行滚到视口里：按 boundingBox 裁切时，行若在视口底部，裁出来只有几像素
+  await row4.scrollIntoViewIfNeeded()
+  await page.waitForTimeout(200)
+  const rowBox = await row4.boundingBox()
+  if (rowBox) {
+    const top = Math.max(0, rowBox.y - 60)
+    await page.screenshot({
+      path: path.join(PROJECT_DIR, 'docs', 'ui-verify-suggest.png'),
+      clip: { x: 0, y: top, width: 1280, height: Math.min(240, 720 - top) },
+    })
+  }
+
+  await chips.first().click()
+  await page.waitForTimeout(400)
+  check('点击建议即挂上分支（建议消失、分支出现）',
+    (await row4.locator('.branch-suggest').count()) === 0 && (await row4.locator('.branch-tag').count()) > 0,
+    (await row4.locator('.branch-text').first().textContent() || '').trim())
+  const persisted = await page.evaluate(() => {
+    const items = JSON.parse(localStorage.getItem('todo_release_data') || '[]')
+    const it = items.find(i => i.name === 'UI验证-待挂分支')
+    return ((it && it.projects) || []).map(p => `${p.name}|${p.branch}`)
+  })
+  check('采用建议后落盘', persisted.includes('ops-web|feat/ops四需求合并分支'), persisted.join(' , '))
 
   // 5) 处置：点「无需需求」后该分支卡片消失
   //    断言必须落在卡片本身：getByText 会同时匹配到外层容器，用文本计数会误判

@@ -277,6 +277,10 @@
                         </div>
                       </template>
                       <span v-else style="color:var(--text-muted)">-</span>
+                      <div v-for="s in autoSuggestions(item)" :key="s.project+s.branch"
+                           class="branch-suggest"
+                           :title="'分支索引里查到：'+s.project+' · '+s.branch+(s.otherBranches.length?'（该项目另有 '+s.otherBranches.join(' / ')+'）':'')+'，点击挂到本需求'"
+                           @click.stop="adoptSuggestion(item,s)">自动匹配：{{s.project}} · {{truncateBranch(s.branch)}}</div>
                     </td>
                     <td>
                       <template v-if="item.syncBranches&&item.syncBranches.length">

@@ -1127,6 +1127,38 @@ createApp({
       return reqToBranchesMap.value.get(workItemId) || []
     }
 
+    /**
+     * 需求行的「自动匹配」建议。
+     *
+     * 分支索引算出来的关联结果原先只在同步预览里出现，需求行上只显示手工挂的分支 ——
+     * 于是一个覆盖本需求、但需求没手工挂它的分支（融合分支最典型：它带着好几个ID，
+     * 只挂在其中一两条需求名下）在页面上完全不可见，既不在未登记分支（它有ID），
+     * 也不在任何需求行上。这里把它补成需求行上的一条可点建议。
+     *
+     * 已经挂在需求上的分支不再重复提示，避免同一行出现两条一样的分支。
+     */
+    function autoSuggestions(item) {
+      const id = selfWorkItemId(item)
+      if (!id) return []
+      const assigned = [
+        ...(item.projects || []).map(p => `${p.name}\u0000${p.branch || ''}`),
+        ...(item.syncBranches || []).map(p => `${p.project}\u0000${p.branch || ''}`),
+      ]
+      return pickPrimaryMatches(matchesOf(id))
+        .filter(m => !assigned.includes(`${m.project}\u0000${m.branch}`))
+    }
+
+    /** 点建议即把该分支挂到本需求：同一项目已填了分支时不覆盖，只提示去右键菜单换 */
+    function adoptSuggestion(item, s) {
+      const list = item.projects || (item.projects = [])
+      const same = list.find(p => p.name === s.project)
+      if (!same) list.push({ name: s.project, branch: s.branch, notes: '' })
+      else if (!same.branch) same.branch = s.branch
+      else { toast(`${s.project} 下已有分支，请用右键菜单更换`); return }
+      saveToLocalStorage()
+      toast(`已挂上 ${s.project} · ${s.branch}`)
+    }
+
     async function loadMeegleStatus() {
       try {
         const res = await fetch(apiUrl('/api/meegle/status'))
@@ -1497,7 +1529,7 @@ createApp({
       dismissReminder, exportAndDismiss, saveLaunchBranch, toggleSection, openMrUrl,
       // v2：分支索引与关联
       refreshBranchIndex, branchOtherIds, impactIds, triageBranchGroup, restoreBranchTriage, deriveRepoUrl,
-      setOnlyMine,
+      setOnlyMine, autoSuggestions, adoptSuggestion,
       // v2：飞书项目同步
       openSyncSettings, openSyncDialog, selectSpace, toggleType, saveSyncSettings, loadTypes,
       fetchMeegleItems, toggleSyncRow, selectAllNew, applySync, matchesOf, pickPrimaryMatches,

@@ -1526,6 +1526,13 @@ input[data-role="syncProjectName"] {
 .unreg-restore-item { margin-right: 10px; }
 .unreg-restore-action { color: var(--text-muted); }
 .unreg-restore a { color: var(--accent); margin-left: 4px; }
+/* 自动匹配出来的分支：虚线 + 可点，和手工挂的实心分支标签区分开 */
+.branch-suggest {
+  display: inline-block; margin-top: 3px; padding: 1px 6px;
+  font-size: 11px; font-family: var(--mono); white-space: nowrap; cursor: pointer;
+  color: var(--accent); border: 1px dashed var(--accent); border-radius: var(--radius-sm);
+}
+.branch-suggest:hover { background: var(--accent-glow); }
 .branch-impact {
   font-size: 10px; padding: 1px 5px; border-radius: 8px; white-space: nowrap; cursor: help;
   color: var(--warning); background: var(--warning-bg); border: 1px solid rgba(245,158,11,0.25);
