@@ -492,6 +492,7 @@
       <div v-if="syncDialog.loading" class="sync-hint" style="padding:24px;text-align:center">正在拉取飞书需求...</div>
       <div v-else-if="syncDialog.error" class="sync-error">{{syncDialog.error}}</div>
       <template v-else>
+        <div v-if="syncIndexHint" class="sync-note">{{syncIndexHint}}</div>
         <div class="sync-summary">
           <span v-for="t in syncDialog.perType" :key="t.apiName" class="sync-summary-item">{{t.name}}：{{t.fetched}}/{{t.count}}<small v-if="t.excluded&&t.excluded.length" class="sync-summary-excluded">（已排除 {{t.excluded.join('/')}}）</small></span>
           <span v-for="e in syncDialog.errors" :key="e.apiName" class="sync-summary-item sync-summary-err">{{e.name}} 失败：{{e.message}}</span>
@@ -532,7 +533,8 @@
                     <span v-if="m.otherBranches.length" class="sync-branch-more">+{{m.otherBranches.length}}</span>
                   </span>
                 </template>
-                <span v-else class="sync-branch-none">未匹配到分支</span>
+                <span v-else-if="!syncIndexHint" class="sync-branch-none">未匹配到分支</span>
+                <span v-else class="sync-branch-none" title="分支索引未覆盖，见上方说明">—</span>
               </div>
               <a class="sync-link" :href="r.link" target="_blank" title="打开飞书需求">↗</a>
             </div>

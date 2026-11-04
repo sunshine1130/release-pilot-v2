@@ -1602,3 +1602,9 @@ input[data-role="syncProjectName"] {
 .sync-group-count { font-size: 11px; color: var(--text-muted); }
 .sync-group-sel { font-size: 11px; color: var(--accent); }
 .sync-summary-excluded { color: var(--text-muted); margin-left: 2px; }
+/* v2: 同步预览里的「为什么没匹配到分支」说明（警示态，不是错误态） */
+.sync-note {
+  font-size: 12px; line-height: 1.7; color: #92400e;
+  background: var(--warning-bg); border: 1px solid var(--warning);
+  border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 10px;
+}

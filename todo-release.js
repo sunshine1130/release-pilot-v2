@@ -1171,6 +1171,14 @@ createApp({
         openSyncSettings()
         return
       }
+
+      // 分支索引是「能不能匹配到分支」的前提。索引没算就直接开预览，会让每一行都显示
+      // 「未匹配到分支」，用户会以为是自己项目的问题 —— 这里先把索引补算上。
+      if (!hasFreshIndex()) {
+        const eligible = state.projectNames.filter(p => p.localPath && deriveRepoUrl(p.mr))
+        if (eligible.length) await refreshBranchIndex(false)
+      }
+
       state.syncDialog = { visible: true, loading: true, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: true }
       state.syncSelection = {}
       try {
@@ -1218,6 +1226,40 @@ createApp({
     })
 
     const syncSelectedCount = computed(() => Object.values(state.syncSelection).filter(Boolean).length)
+
+    /**
+     * 「为什么没匹配到分支」的说明。
+     *
+     * 逐行显示「未匹配到分支」会把一个全局前置条件问题伪装成单条需求的事实 ——
+     * 用户看到 7134246577 明明在 pms-web 有分支却显示未匹配，第一反应只会是工具坏了。
+     * 这里把真正的原因（没配项目 / 没配本地路径 / 索引没算 / 索引没覆盖全部项目）讲出来。
+     */
+    const syncIndexHint = computed(() => {
+      const all = state.projectNames
+      const eligible = all.filter(p => p.localPath && deriveRepoUrl(p.mr))
+      const indexed = Object.keys(state.branchIndex)
+
+      if (!all.length) {
+        return '还没有配置任何项目，因此无法反查需求对应的分支。请展开「项目管理」添加项目'
+          + '（需要「MR 地址」+「本地路径」），再点「刷新分支索引」。'
+          + '如果你之前用的是旧版（端口 1949），旧版数据不在当前端口的浏览器存储里 ——'
+          + '可以停掉旧版服务后重启本工具（端口相同即数据可见），或在旧版「导出」后于本页「导入」。'
+      }
+      if (!eligible.length) {
+        return `已配置 ${all.length} 个项目，但没有一个同时具备「MR 地址」和「本地路径」，无法反查分支。`
+          + '反查要用本地提交历史，两者缺一不可。'
+      }
+      if (!indexed.length) {
+        return `分支索引还没生成（将覆盖 ${eligible.length} 个项目），所以现在每条需求都显示未匹配到分支。`
+          + '请点顶部「刷新分支索引」。'
+      }
+      if (indexed.length < eligible.length) {
+        const missing = eligible.map(p => p.name).filter(n => !indexed.includes(n))
+        return `分支索引只覆盖了 ${indexed.length}/${eligible.length} 个项目。`
+          + `以下项目未参与匹配：${missing.join('、')}。`
+      }
+      return ''
+    })
 
     function toggleSyncRow(workItemId) {
       state.syncSelection[workItemId] = !state.syncSelection[workItemId]
@@ -1443,6 +1485,7 @@ createApp({
       syncRows,
       syncGroups,
       toggleGroup,
+      syncIndexHint,
       syncSelectedCount
     }
   }

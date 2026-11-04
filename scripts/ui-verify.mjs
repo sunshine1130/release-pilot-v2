@@ -359,6 +359,55 @@ try {
   await page.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify.png'), fullPage: true })
   console.log(`\n截图已保存: docs/ui-verify.png`)
 
+  // ===== 12) 分支匹配的前置条件诊断（用户实际踩到的场景）=====
+  // 真实事故：需求 7134246577 在 pms-web 上明明有分支，预览却逐行显示「未匹配到分支」。
+  // 原因是索引没生成/项目没配 —— 但这被逐行文案伪装成了「单条需求的事实」。
+  // 12a 没有任何项目时，必须说明真实原因，不能再逐行谎报
+  await page.evaluate(() => {
+    // 每日提醒的判断是「记录日期 === 今天」才不弹，所以必须写成今天；
+    // 写成未来的日期反而会弹出来挡住点击（这里踩过一次）
+    const t = new Date()
+    const d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+    localStorage.setItem('todo_last_remind_date', d)
+    localStorage.setItem('todo_project_names', '[]')
+    localStorage.setItem('todo_branch_index', '{}')
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: '同步飞书项目' }).click()
+  await previewBox.locator('.sync-note').waitFor({ timeout: 240000 })
+  const noProjectNote = ((await previewBox.locator('.sync-note').textContent()) || '').trim()
+  check('未配置项目时给出明确原因', /没有配置任何项目/.test(noProjectNote), noProjectNote.slice(0, 70))
+  check('此时不再逐行谎报「未匹配到分支」',
+    (await previewBox.locator('.sync-branch-none', { hasText: '未匹配到分支' }).count()) === 0)
+  await previewBox.locator('.sync-header .btn-close').click()
+  await page.waitForTimeout(200)
+
+  // 12b 配上 pms-web（MR 地址 + 本地路径）后，7134246577 必须能匹配到它的真实分支
+  await page.evaluate(() => {
+    const t = new Date()
+    const d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+    localStorage.setItem('todo_last_remind_date', d)
+    localStorage.setItem('todo_project_names', JSON.stringify([
+      { name: 'pms-web', mr: 'https://git.joyintoy.cn/joyin/pms-web', localPath: 'C:\\项目\\pms-web' },
+    ]))
+    localStorage.setItem('todo_branch_index', '{}')
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: '同步飞书项目' }).click()
+  await previewBox.getByPlaceholder('按名称或需求ID筛选...').waitFor({ timeout: 300000 })
+  // 前序阶段已经导入过约 100 条，7134246577 很可能就在其中；
+  // 「只看未导入」是默认勾选的，不取消掉会把它过滤掉，等不到分支徽标
+  await previewBox.getByText('只看未导入').click()
+  await page.waitForTimeout(300)
+  await previewBox.getByPlaceholder('按名称或需求ID筛选...').fill('7134246577')
+  await page.waitForTimeout(800)
+  await previewBox.locator('.sync-branch').first().waitFor({ timeout: 60000 })
+  const matched = ((await previewBox.locator('.sync-branch').first().textContent()) || '').trim()
+  check('配置 pms-web 后 7134246577 能匹配到分支', /pms-web/.test(matched), matched)
+  check('配置齐全时不再显示前置条件提示', (await previewBox.locator('.sync-note').count()) === 0)
+
   check('无 JS 未捕获异常', jsErrors.length === 0, jsErrors.slice(0, 3).join(' | '))
 
   // toDo.json 不存在时的 404 是 v1 既有正常分支（loadFromJsonFile 会静默回退 localStorage）；
