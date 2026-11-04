@@ -17,7 +17,10 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .cursor
-.kiro
+# v2: .kiro 里除规格文档外都是编辑器产物。必须写成 .kiro/* 而不是 .kiro ——
+# 排除整个目录后 git 不会进去，后面的 ! 规则再写也没用，规格就静默丢了版本管理。
+.kiro/*
+!.kiro/specs/
 .trae
 .idea
 .nvmdrc
