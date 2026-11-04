@@ -268,6 +268,71 @@ try {
   await settingsBox.locator('.sync-footer .btn-purple').click()
   await page.waitForTimeout(300)
 
+  // ===== 10) 导出的 v2 字段与导入往返 =====
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: '导出' }).click(),
+  ])
+  const exported = JSON.parse(fs.readFileSync(await download.path(), 'utf8'))
+  check('导出包含 v2 新增字段',
+    ['branchTriage', 'branchLinks', 'meegleConfig'].every(k => k in exported),
+    `顶层字段：${Object.keys(exported).join(', ')}`)
+
+  // 往导出文件里加一条「无需需求」处置再导入：验证新增字段能真正被应用并落盘
+  exported.branchTriage = exported.branchTriage || {}
+  exported.branchTriage['ops-web\u0000feat/mdm二期分支'] = { action: 'exempt', at: Date.now() }
+  const importPath = path.join(PROJECT_DIR, '.tmp-import.json')
+  fs.writeFileSync(importPath, JSON.stringify(exported))
+  await page.locator('input[type=file]').setInputFiles(importPath)
+  await page.waitForTimeout(1000)
+  check('导入后处置生效（该分支卡片消失）', (await cardOf('feat/mdm二期分支').count()) === 0)
+  check('导入后需求数据仍在', (await page.locator('h1 .sub').textContent() || '').includes('共'))
+  fs.unlinkSync(importPath)
+
+  // ===== 11) v1 主路径回归（v2 要替换 v1，必须确认没碰坏老功能）=====
+  await page.getByRole('button', { name: '+ 新增需求' }).click()
+  await page.getByPlaceholder('需求名称（必填）').fill('回归-新增需求')
+  await page.locator('tr.edit-row').getByRole('button', { name: '保存' }).first().click()
+  await page.waitForTimeout(500)
+  check('v1 新增需求', (await page.getByText('回归-新增需求').count()) > 0)
+
+  const newRow = page.locator('tr', { hasText: '回归-新增需求' })
+  await newRow.getByRole('button', { name: '设为待发版' }).click()
+  await page.waitForTimeout(400)
+  check('v1 状态流转 新建→待发版', ((await newRow.locator('.status-tag').textContent()) || '').includes('待发版'))
+
+  await newRow.getByRole('button', { name: '编辑' }).click()
+  await page.getByPlaceholder('需求名称（必填）').fill('回归-编辑后')
+  await page.locator('tr.edit-row').getByRole('button', { name: '保存' }).first().click()
+  await page.waitForTimeout(400)
+  check('v1 编辑保存', (await page.getByText('回归-编辑后').count()) > 0)
+
+  const editedRow = page.locator('tr', { hasText: '回归-编辑后' })
+  await editedRow.getByRole('button', { name: '删' }).click()
+  await page.waitForTimeout(300)
+  check('v1 删除二次确认', (await page.getByText('确定删除该需求吗？').count()) > 0)
+  await page.getByRole('button', { name: '确定删除' }).click()
+  await page.waitForTimeout(400)
+  // 断言必须落在表格行上：删除后会弹「已删除：回归-编辑后」的 toast，
+  // 用整页文本判断会被 toast 自己命中，看起来像没删掉
+  check('v1 删除后行消失', (await page.locator('tr', { hasText: '回归-编辑后' }).count()) === 0)
+
+  const searchInput = page.getByPlaceholder('搜索需求名称、链接ID或分支名...')
+  await searchInput.fill('UI验证-销售预测')
+  await page.waitForTimeout(400)
+  const filtered = await page.locator('tr', { hasText: 'UI验证-销售预测' }).count()
+  const hidden = await page.locator('tr', { hasText: 'UI验证-老数据形态' }).count()
+  check('v1 搜索过滤', filtered > 0 && hidden === 0, `命中 ${filtered}，被过滤 ${hidden}`)
+  await page.locator('.search-clear').click()
+
+  // 每日提醒：清掉当天标记后刷新，应重新弹出
+  await page.evaluate(() => localStorage.removeItem('todo_last_remind_date'))
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(800)
+  check('v1 每日备份提醒弹出', (await page.getByText('数据备份提醒').count()) > 0)
+  await page.getByRole('button', { name: '暂不保存' }).click()
+  await page.waitForTimeout(300)
+
   await page.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify.png'), fullPage: true })
   console.log(`\n截图已保存: docs/ui-verify.png`)
 

@@ -223,7 +223,19 @@ createApp({
 
     // ===== Persistence =====
     function getFullData() {
-      return { projectNames: state.projectNames, items: state.items, branchesCache: state.branchesCache, launchBranch: state.launchBranch }
+      return {
+        projectNames: state.projectNames,
+        items: state.items,
+        branchesCache: state.branchesCache,
+        launchBranch: state.launchBranch,
+        // v2：人工判断与集成配置要跟着导出走 —— 换机器或清了浏览器缓存后，
+        // 不用把「哪些分支标记为无需需求」「上次同步哪个空间」重新做一遍。
+        // 分支索引（branchIndex）刻意不导出：它是从 git 重算出来的派生数据，
+        // 导出去只会变成一份过期快照，反而让人误以为分支现状就是这样。
+        branchTriage: state.branchTriage,
+        branchLinks: state.branchLinks,
+        meegleConfig: state.meegleConfig,
+      }
     }
 
     function setFullData(data) {
@@ -231,6 +243,15 @@ createApp({
       if (data && Array.isArray(data.items)) state.items = data.items
       if (data && data.branchesCache && typeof data.branchesCache === 'object') state.branchesCache = data.branchesCache
       if (data && typeof data.launchBranch === 'string') state.launchBranch = data.launchBranch
+      // 旧版导出文件没有这几个字段：缺失时保持现状，不要把已有处置清空
+      if (data && data.branchTriage && typeof data.branchTriage === 'object') state.branchTriage = data.branchTriage
+      if (data && data.branchLinks && typeof data.branchLinks === 'object') state.branchLinks = data.branchLinks
+      if (data && data.meegleConfig && typeof data.meegleConfig === 'object') {
+        state.meegleConfig = { ...state.meegleConfig, ...data.meegleConfig }
+      }
+      // 导入/加载后立即落盘，否则刷新一次这些新字段就丢了
+      saveBranchTriage()
+      saveMeegleConfig()
     }
 
     function saveToLocalStorage() {
