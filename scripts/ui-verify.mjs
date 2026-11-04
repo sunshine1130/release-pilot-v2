@@ -737,6 +737,26 @@ try {
 
   check('无 JS 未捕获异常', jsErrors.length === 0, jsErrors.slice(0, 3).join(' | '))
 
+  // ===== 14) 端口漂移提示 =====
+  // 浏览器按「协议+主机+端口」隔离 localStorage：引擎漂到 1950 时页面看到的是另一份
+  // （通常是空的）数据。这种情况必须明示，否则用户只会以为数据丢了。
+  // 用单独的 page 验证，避免它打到不存在的端口污染主流程的错误收集。
+  const portFile = path.join(PROJECT_DIR, '.server-port')
+  const realPortText = fs.readFileSync(portFile, 'utf8')
+  const portPage = await context.newPage()
+  try {
+    fs.writeFileSync(portFile, '1950')
+    await portPage.goto(BASE, { waitUntil: 'domcontentloaded' })
+    await portPage.waitForTimeout(700)
+    check('引擎端口非默认时给出「数据按来源隔离」提示',
+      await portPage.locator('.port-note').isVisible(),
+      ((await portPage.locator('.port-note').textContent()) || '').trim())
+  } finally {
+    fs.writeFileSync(portFile, realPortText)
+    await portPage.close()
+  }
+  check('端口正常时不显示该提示', (await page.locator('.port-note').count()) === 0)
+
   // toDo.json 不存在时的 404 是 v1 既有正常分支（loadFromJsonFile 会静默回退 localStorage）；
   // favicon 缺失与功能无关。除这两者外出现 4xx/5xx 都算回归。
   const KNOWN_404 = /toDo\.json|favicon\.ico/i

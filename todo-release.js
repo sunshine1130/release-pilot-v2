@@ -10,7 +10,17 @@ const JSON_FILENAME = 'toDo.json'
  * 所以启动时先读端口文件，读不到再退回默认值（旧引擎不写这个文件，属正常情况）。
  */
 const DEFAULT_API_PORT = 1949
-const api = { port: DEFAULT_API_PORT }
+// 用 reactive 而不是普通对象：端口是启动后才知道的，模板里的提示要跟着它出现
+const api = reactive({ port: DEFAULT_API_PORT })
+
+/**
+ * 引擎跑在非默认端口上。
+ *
+ * 这不仅是「换个地址」：localStorage 按来源（协议+主机+端口）隔离，
+ * 端口一变页面看到的就是另一份数据（通常是空的）。所以一旦漂移必须在界面上说清楚，
+ * 否则用户会以为「数据丢了」。
+ */
+const portShifted = computed(() => api.port !== DEFAULT_API_PORT)
 
 async function resolveApiPort() {
   try {
@@ -1641,6 +1651,8 @@ createApp({
       unregExpanded: computed({ get: () => state.unregExpanded, set: v => { state.unregExpanded = v } }),
       unregKeyword: computed({ get: () => state.unregKeyword, set: v => { state.unregKeyword = v } }),
       indexDiagnostics,
+      portShifted,
+      apiPort: computed(() => api.port),
       indexConfig: computed(() => state.indexConfig),
       indexNotMineTotal,
       // v2 飞书同步别名

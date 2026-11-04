@@ -44,6 +44,10 @@
       <button class="btn btn-outline btn-sm" @click="openSyncSettings">同步设置</button>
       <button class="btn btn-primary" @click="startAdding">+ 新增需求</button>
     </div>
+    <div class="port-note" v-if="portShifted"
+         :title="'引擎实际运行在 ' + apiPort + ' 端口（默认 1949 被占用，通常是老版本引擎先起来了）。浏览器按「协议+主机+端口」隔离数据，换端口等于换一份数据 —— 如果这里需求和配置是空的，先关掉占用 1949 的程序再重启引擎，或改用原来的地址打开。'">
+      引擎端口 {{apiPort}}（非默认）
+    </div>
   </div>
 
   <!-- Branch progress -->
