@@ -164,6 +164,7 @@ kbd {
     <tr><td><code>backup/</code></td><td>「备份」按钮写出的数据备份（自动创建）</td></tr>
     <tr><td><code>docs/</code></td><td>技术方案与接口/算法/数据模型文档</td></tr>
     <tr><td><code>scripts/ui-verify.mjs</code></td><td>浏览器端自动化验证脚本（可选）</td></tr>
+    <tr><td><code>scripts/v1-migrate-verify.mjs</code></td><td>v1→v2 迁移路径的浏览器验证：老数据自动可见、老导出文件可导入（可选）</td></tr>
   </table>
   <p style="margin-top:12px">双击 <code>start-server.bat</code> 启动服务并自动打开页面（端口被占用时会顺延，页面会自动跟随）。无需构建工具。</p>
 </div>
@@ -194,8 +195,56 @@ kbd {
   <code>todo_meegle_config</code>（同步设置）。后三个会随导出文件一起备份。</p>
 </div>
 
+<!-- ===== 从 v1 升级 ===== -->
+<h2>二、从 v1 升级到 v2</h2>
+
+<div class="card">
+  <h3>数据不用搬：用同一个地址打开就能看到</h3>
+  <p>v2 沿用 v1 的存储键名（<code>todo_project_names</code>、<code>todo_release_data</code>、<code>todo_branch_cache</code>、<code>todo_launch_branch</code>），
+  而浏览器存储按<strong>协议 + 主机 + 端口</strong>隔离，两边默认都是 <code>http://localhost:1949</code> —— 同一个源，
+  所以在 v2 目录启动服务、打开页面时，<strong>v1 里已登记的需求、项目清单、公用上线分支就已经在了</strong>，不需要导出导入。</p>
+  <table class="table-demo">
+    <tr><th style="width:180px">前提</th><th>说明</th></tr>
+    <tr><td>地址与 v1 一致</td><td><code>localhost</code> 与 <code>127.0.0.1</code> 在浏览器眼里是两个站，数据不通用。两版的启动脚本都自动打开 <code>http://localhost:1949</code>，不要手敲成 IP。</td></tr>
+    <tr><td>端口与 v1 一致（1949）</td><td>端口被占用时 v2 会自动顺延（1949 → 1950 …），换了端口就是另一份数据。页头出现 <code>引擎端口 19xx（非默认）</code> 即是此情况：先关掉占用 1949 的程序（多半是没关干净的 v1 服务窗口）再重启。</td></tr>
+    <tr><td>两版不同时运行</td><td>v1 与 v2 默认都监听 1949，同时开会有一个起不来。日常只用 v2，先关掉 v1 的服务窗口。</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>换机器 / 换浏览器 / 换目录：走导出导入</h3>
+  <ol>
+    <li>在 <strong>v1</strong> 页面点「导出」，得到 <code>todoList-发版需求-&lt;时间&gt;.json</code>；</li>
+    <li>在 <strong>v2</strong> 页面点「导入」，选中该文件即可。</li>
+  </ol>
+  <p>v1 的导出文件只有 4 个字段，v2 完全兼容：导入后「需求清单、项目清单、分支缓存、公用上线分支」按文件内容<strong>整体替换</strong>，
+  而 v2 新增的<strong>分支处置、手工关联、同步设置不受影响</strong>——老文件里没有这些字段，v2 保留现有值，不会清空。</p>
+  <p>若 v1 目录里放过 <code>toDo.json</code>，把它复制到 v2 目录同样有效（它的优先级高于 localStorage）。</p>
+</div>
+
+<div class="card">
+  <h3>升级后要补的配置（v1 里没有）</h3>
+  <ol>
+    <li><strong>每个项目的「本地克隆路径」+「MR 地址」</strong>：分支索引要靠这两项才能反查「这条需求被哪些分支覆盖」。
+      只填其一，点「刷新分支索引」会提示「没有同时配置 MR 地址与本地路径的项目」。</li>
+    <li><strong>飞书项目同步设置</strong>：空间 + 工作项类型（可多选）+ MQL 模板，配一次即可。</li>
+    <li><strong>确认「只看我的分支」</strong>：v2 默认勾选（只列你自己创建的分支），想看全部就取消勾选。</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h3>建议的切换顺序</h3>
+  <ol>
+    <li>先在 v1 里点一次「导出」留底（万一浏览器缓存出问题，这就是后悔药）；</li>
+    <li>关掉 v1 的服务窗口 → 在 v2 目录双击 <code>start-server.bat</code>；</li>
+    <li>确认需求、项目都还在 → 点一次「备份」（写进 <code>backup/</code>，清浏览器缓存也不丢）；</li>
+    <li>补上项目路径与同步设置，跑一次「刷新分支索引」。</li>
+  </ol>
+  <p style="margin-top:10px">v1 目录留着不影响使用，但别再启动它的服务（会抢 1949 端口），日常只用 v2。</p>
+</div>
+
 <!-- ===== 需求管理 ===== -->
-<h2>二、需求管理</h2>
+<h2>三、需求管理</h2>
 
 <div class="card">
   <h3>需求状态流转</h3>
@@ -239,7 +288,7 @@ kbd {
 </div>
 
 <!-- ===== 发版流程 ===== -->
-<h2>三、飞书项目同步（v2 新增）</h2>
+<h2>四、飞书项目同步（v2 新增）</h2>
 
 <div class="note">
   <strong>前置条件：</strong>本地服务已启动，且已登录飞书项目。首次使用需在终端执行一次
@@ -299,7 +348,7 @@ kbd {
   你在本地改过的标题和分支不会被同步冲掉。</p>
 </div>
 
-<h2>四、分支索引与未登记分支（v2 新增）</h2>
+<h2>五、分支索引与未登记分支（v2 新增）</h2>
 
 <div class="card">
   <h3>刷新分支索引</h3>
@@ -361,7 +410,7 @@ kbd {
   </ul>
 </div>
 
-<h2>五、发版流程</h2>
+<h2>六、发版流程</h2>
 
 <div class="card">
   <h3>单条发版</h3>
@@ -405,7 +454,7 @@ kbd {
 </div>
 
 <!-- ===== 项目管理 ===== -->
-<h2>六、项目管理</h2>
+<h2>七、项目管理</h2>
 
 <div class="card">
   <h3>展开/折叠</h3>
@@ -464,7 +513,7 @@ kbd {
 </div>
 
 <!-- ===== 分支管理 ===== -->
-<h2>七、分支管理</h2>
+<h2>八、分支管理</h2>
 
 <div class="note">
   <strong>前置条件：</strong>需要启动本地 Node.js 分支查询服务。
@@ -507,7 +556,7 @@ kbd {
 </div>
 
 <!-- ===== 备注功能 ===== -->
-<h2>八、备注功能</h2>
+<h2>九、备注功能</h2>
 
 <div class="card">
   <h3>为分支添加备注</h3>
@@ -529,7 +578,7 @@ kbd {
 </div>
 
 <!-- ===== 导入导出 ===== -->
-<h2>九、备份与导入导出</h2>
+<h2>十、备份与导入导出</h2>
 
 <div class="card">
   <h3>备份（推荐）</h3>
@@ -577,7 +626,7 @@ kbd {
 </div>
 
 <!-- ===== 键盘快捷键 ===== -->
-<h2>十、键盘快捷键</h2>
+<h2>十一、键盘快捷键</h2>
 
 <div class="card">
   <table class="table-demo">

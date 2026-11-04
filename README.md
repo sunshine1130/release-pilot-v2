@@ -7,7 +7,7 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/sunshine1130/release-pilot-v2.git   # 私有仓库，需要先被加为协作者
+git clone https://github.com/sunshine1130/release-pilot-v2.git   # 公开仓库，直接克隆，无需登录
 cd release-pilot-v2
 node server.js          # 或双击 start-server.bat
 ```
@@ -30,18 +30,29 @@ meegle auth login --host project.feishu.cn
 | 情况 | 现象 | 怎么办 |
 |---|---|---|
 | 这次更新改了 `server.js` | 提示「改动包含引擎代码」 | 关掉服务窗口、重跑 `start-server.bat`，再刷新页面（引擎在进程里，刷新页面不会重新加载它） |
-| 还没登录过 GitHub（私有仓库） | 提示「拉取需要 GitHub 登录」 | 在项目目录里手工执行一次 `git pull`，按提示在浏览器里完成登录；之后点徽标就能直接更新 |
+
+仓库是公开的，拉取不需要 GitHub 登录。
 
 也可以直接双击 `更新.bat`（等价于 `git pull --ff-only`），引擎没起来时用它。
 
 ## 分享给同事
 
-1. **加协作者**：GitHub 仓库 → Settings → Collaborators → 添加同事的账号（私有仓库必须加，否则他们拉不到）。
-2. 同事克隆并启动（同上「快速开始」）。
+1. 把仓库地址发给他们：`https://github.com/sunshine1130/release-pilot-v2` —— **公开仓库，不需要加协作者，也不需要 GitHub 账号**。
+2. 同事克隆并启动（见「快速开始」）。之后你每次 `git push`，他们在页面点一下版本徽标（或双击 `更新.bat`）就能拉到新版。
 3. 各自配置自己的环境，**这些不随仓库分享**：
    - 「项目管理」里每个项目的 **MR 地址 + 本地克隆路径**（本地路径因机器而异）；
    - 飞书项目 CLI 登录（`meegle auth login`）；
    - 需求数据本身（存在各自浏览器的 localStorage 里，可用「导出 / 导入」或项目里的 `backup/` 互相传）。
+
+## 从 v1 升级到 v2
+
+**数据不用搬**：v2 沿用 v1 的存储键名，而浏览器存储按「协议 + 主机 + 端口」隔离，两边默认都是 `http://localhost:1949` —— 同一个源。所以关掉 v1 的服务、在 v2 目录启动，打开页面就能看到 v1 里的需求、项目清单与公用上线分支，不需要导出导入。
+
+三个硬前提：地址要用 `localhost`（`127.0.0.1` 在浏览器眼里是另一个站，数据不通用）、端口要是 `1949`（被占用会自动顺延，等于换了一份数据）、v1 与 v2 的服务**不同时开**（都抢 1949）。
+
+换机器 / 换浏览器 / 换目录时走导出导入：v1 点「导出」、v2 点「导入」即可。v1 的老文件只有 4 个字段，v2 兼容，且**不会清空** v2 新增的分支处置、手工关联与同步设置。
+
+升级后要补的配置（v1 里没有）：每个项目的「本地克隆路径 + MR 地址」、飞书项目同步设置、确认「只看我的分支」。完整步骤见 [使用说明.html](使用说明.html) 第二节。
 
 ## v2 相对 v1 解决了什么
 
@@ -62,6 +73,7 @@ start-server.bat                 启动入口
 使用说明.html                     面向使用者的文档
 docs/                            技术方案与接口/算法/数据模型/实现设计文档
 scripts/ui-verify.mjs            Playwright 真实浏览器验证脚本
+scripts/v1-migrate-verify.mjs    v1→v2 迁移路径验证（老数据自动可见、老导出文件可导入）
 scripts/.verify.local.example.json  验证脚本的环境配置模板（真实配置放 .verify.local.json，已 gitignore）
 更新.bat                          一键 git pull（引擎没起来时用；页面里点版本号也行）
 backup/                          「备份」按钮写出的数据备份（.gitignore 已排除，不提交）
@@ -83,6 +95,7 @@ backup/                          「备份」按钮写出的数据备份（.giti
 node server.js                                              # 另开一个终端
 cp scripts/.verify.local.example.json .verify.local.json    # 首次：按你的环境填写
 node scripts/ui-verify.mjs                                  # 真实浏览器跑 104 项断言
+node scripts/v1-migrate-verify.mjs                          # v1→v2 迁移路径（老数据可见/老文件可导入）7 项断言
 ```
 
 脚本要驱动**本机真实环境**（本地 git 克隆、飞书空间、真实分支与需求 ID），这些属于私有数据，
