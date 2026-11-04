@@ -286,6 +286,9 @@
 7. WHEN 同步时本地已存在同一需求，THE The_App SHALL **不覆盖**本地已修改的内容。
 8. IF 用户未登录飞书项目，THEN THE The_App SHALL 给出明确的重新登录指引且不打开空白的预览窗口。
 9. WHEN 查询使用 MQL，THE The_App SHALL 由前端下发可编辑的 MQL 模板（含 `{space}` 与 `{type}` 占位符），服务端不得硬编码查询语句。
+10. WHEN 用户打开「同步预览」，THE The_App SHALL **不预勾选任何需求、不默认启用「只看未导入」筛选**，把筛选与勾选的决定权交给用户。
+11. THE The_App SHALL 按需求状态分组展示预览结果，并在组头给出条数与新增数，支持「全选本组 / 取消本组」。
+12. WHEN 用户点击分组标题，THE The_App SHALL 切换该组的展开与收起；收起只影响显示，不得改变已勾选的项，且收起态下「全选本组 / 取消本组」仍可用。
 
 ### Requirement 21: GitLab 分支直读
 
@@ -327,6 +330,7 @@
 3. WHEN 用户对未登记分支选择「无需需求」或「忽略」，THE The_App SHALL 记录该处置并使其不再出现在列表中，且该处置对同名分支的所有项目同时生效。
 4. WHEN 用户恢复已处置的分支，THE The_App SHALL 使其重新出现在列表中。
 5. THE The_App SHALL 持久化未登记分支的处置结果，并在导出数据时一并导出。
+6. THE The_App SHALL 默认收起「未登记分支」面板（标题上仍显示条数），点击标题可展开。
 
 ### Requirement 24: 手动刷新分支索引
 
