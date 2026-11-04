@@ -15,6 +15,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
+import http from 'node:http'
 
 const require = createRequire(import.meta.url)
 const PLAYWRIGHT_CANDIDATES = [
@@ -125,6 +126,49 @@ const httpErrors = []
 page.on('response', r => { if (r.status() >= 400) httpErrors.push(`${r.status()} ${r.url()}`) })
 
 try {
+  // ===== 0) 引擎自检（HTTP 层，走原始请求绕开浏览器的 URL 归一化）=====
+  // 这几条都是「一条请求打死服务/读出目录外文件」级别的问题，必须每次回归都验
+  const rawGet = (rawPath, headers = {}) =>
+    new Promise(resolve => {
+      const req = http.get({ host: '127.0.0.1', port: PORT, path: rawPath, headers }, res => {
+        let body = ''
+        res.on('data', c => { body += c })
+        res.on('end', () => resolve({ status: res.statusCode, body, headers: res.headers }))
+      })
+      req.on('error', e => resolve({ status: 0, body: String(e.message), headers: {} }))
+    })
+
+  // 非法百分号转义曾让 decodeURIComponent 抛 URIError 逃逸成 unhandled rejection → 进程退出
+  const badEscape = await rawGet('/%zz')
+  const stillAlive = await rawGet('/api/git-user')
+  check('非法转义不再打死引擎（返回 400 且服务存活）',
+    badEscape.status === 400 && stillAlive.status === 200,
+    `非法转义 ${badEscape.status}，随后探活 ${stillAlive.status}`)
+
+  // 目录穿越：造一个与 BASE_DIR 同名前缀的兄弟目录，前缀式校验会把它当成「目录内」
+  const sibling = `${PROJECT_DIR}-verify-sibling`
+  fs.mkdirSync(sibling, { recursive: true })
+  fs.writeFileSync(path.join(sibling, 'secret.txt'), 'should-not-be-served')
+  try {
+    const escaped = await rawGet('/%2e%2e/' + encodeURIComponent(path.basename(sibling)) + '/secret.txt')
+    check('同名前缀的兄弟目录不可读（目录穿越被挡）',
+      escaped.status !== 200 && !escaped.body.includes('should-not-be-served'),
+      `${escaped.status} ${escaped.body.slice(0, 40)}`)
+  } finally {
+    // 不能用 fs.rmSync(dir, {recursive:true}) —— 本机 Node 24.2.0 上它会静默杀死进程（exit 127，
+    // 无任何错误输出），脚本会在这一行之后全部不执行。逐个删文件再 rmdir 是可靠的。
+    try {
+      fs.unlinkSync(path.join(sibling, 'secret.txt'))
+      fs.rmdirSync(sibling)
+    } catch {}
+  }
+
+  // 任意网页的跨域请求必须被拒：接口能列本地仓库分支、还能以本人身份查飞书项目
+  const foreign = await rawGet('/api/git-user', { Origin: 'https://evil.example' })
+  check('非本机来源的请求被拒绝', foreign.status === 403, `状态 ${foreign.status}`)
+  const localOrigin = await rawGet('/api/git-user', { Origin: `http://localhost:${PORT}` })
+  check('本机来源仍可用（localhost 与 127.0.0.1 都放行）', localOrigin.status === 200, `状态 ${localOrigin.status}`)
+
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
 
   // 预置数据：项目配置 + 需求 + 关掉每日提醒（否则遮罩挡住点击）
@@ -204,9 +248,9 @@ try {
   await unregSearch.fill('zzz-不存在的分支')
   await page.waitForTimeout(300)
   check('无命中时给出明确空态',
-    (await unregCards.count()) === 0 && (await page.getByText('没有匹配的分支').count()) > 0)
+    (await unregCards.count()) === 0 && (await page.locator('.unreg-panel .empty-state', { hasText: '没有匹配的分支' }).isVisible()))
   check('无命中时不误报「暂无未登记分支」',
-    (await page.getByText('暂无未登记分支').count()) === 0)
+    (await page.locator('.unreg-panel .empty-state', { hasText: '暂无未登记分支' }).count()) === 0)
 
   await unregSearch.fill('')
   await page.waitForTimeout(300)
@@ -465,6 +509,43 @@ try {
   await page.waitForTimeout(400)
   check('v1 状态流转 新建→待发版', ((await newRow.locator('.status-tag').textContent()) || '').includes('待发版'))
 
+  // 有发版中的需求时，「发版中」分组必须仍然可折叠 ——
+  // 曾在 sections computed 内部写自己的依赖，导致点折叠后重算又被置回展开
+  const releasingSection = page.locator('.section', { has: page.locator('h2', { hasText: '发版中' }) })
+  await newRow.getByRole('button', { name: '发版' }).click()
+  await page.waitForTimeout(500)
+  check('需求可进入发版中', (await page.locator('tr', { hasText: '回归-新增需求' }).locator('.status-tag').textContent() || '').includes('发版中'))
+  const releasingArrow = releasingSection.locator('.collapse-header .arrow')
+  check('有发版中需求时该分组默认展开', (await releasingArrow.getAttribute('class') || '').includes('open'))
+  await releasingSection.locator('.collapse-header').click()
+  await page.waitForTimeout(300)
+  check('发版中分组可以折叠（computed 不再回写自己的依赖）',
+    !(await releasingArrow.getAttribute('class') || '').includes('open'),
+    await releasingArrow.getAttribute('class') || '')
+  await releasingSection.locator('.collapse-header').click()
+  await page.waitForTimeout(300)
+  // 「全部发版」在折叠标题内部，没有 @click.stop 就会顺带把分组折叠
+  await releasingSection.getByRole('button', { name: '全部发版' }).click()
+  await page.waitForTimeout(500)
+  check('「全部发版」不会顺带折叠分组',
+    (await releasingArrow.getAttribute('class') || '').includes('open'),
+    await releasingArrow.getAttribute('class') || '')
+
+  // 分组空了必须能看到空态文案：.empty-state 曾被 display:none 写死，文案永远不显示
+  check('空分区的空态文案可见',
+    await releasingSection.locator('.empty-state', { hasText: '暂无发版中需求' }).isVisible())
+
+  // 这条路走完把它放回待发版：后面的编辑/删除回归要用同一个待发版的行
+  const releasedSection = page.locator('.section', { has: page.locator('h2', { hasText: '已发版' }) })
+  await releasedSection.locator('.collapse-header').click()
+  await page.waitForTimeout(300)
+  await page.locator('tr', { hasText: '回归-新增需求' }).getByRole('button', { name: '恢复待发版' }).click()
+  await page.waitForTimeout(400)
+
+  // 表格横向滚动：窄窗口下右侧「操作」列要靠它才够得着
+  check('表格容器可横向滚动',
+    (await page.locator('.table-wrap').first().evaluate(el => getComputedStyle(el).overflowX)) === 'auto')
+
   await newRow.getByRole('button', { name: '编辑' }).click()
   await page.getByPlaceholder('需求名称（必填）').fill('回归-编辑后')
   await page.locator('tr.edit-row').getByRole('button', { name: '保存' }).first().click()
@@ -474,7 +555,9 @@ try {
   const editedRow = page.locator('tr', { hasText: '回归-编辑后' })
   await editedRow.getByRole('button', { name: '删' }).click()
   await page.waitForTimeout(300)
-  check('v1 删除二次确认', (await page.getByText('确定删除该需求吗？').count()) > 0)
+  // 断言必须看**可见性**：确认弹窗是常驻 DOM、只切 display，
+  // 用 count() 判断永远为真，绑定写坏了也照样绿
+  check('v1 删除二次确认', await page.getByText('确定删除该需求吗？').isVisible())
   await page.getByRole('button', { name: '确定删除' }).click()
   await page.waitForTimeout(400)
   // 断言必须落在表格行上：删除后会弹「已删除：回归-编辑后」的 toast，
@@ -494,7 +577,9 @@ try {
   await page.evaluate(() => localStorage.removeItem('todo_last_remind_date'))
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(800)
-  check('v1 每日备份提醒弹出', (await page.getByText('数据备份提醒').count()) > 0)
+  // 同样必须看可见性：提醒弹窗也常驻 DOM，靠 .show 类控制显隐
+  check('v1 每日备份提醒弹出',
+    await page.locator('.reminder-overlay.show .reminder-title', { hasText: '数据备份提醒' }).isVisible())
   await page.getByRole('button', { name: '暂不保存' }).click()
   await page.waitForTimeout(300)
 

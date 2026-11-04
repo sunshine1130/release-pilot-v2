@@ -118,13 +118,20 @@ createApp({
       const pending = filterItems(state.items.filter(i => i.status === 'pending' || i.status === 'new'))
       const releasing = filterItems(state.items.filter(i => i.status === 'releasing'))
       const released = filterItems(state.items.filter(i => i.status === 'released'))
-      if (releasing.length > 0) state.sectionExpanded.releasing = true
       return [
         { key: 'pending', title: '待发版', items: pending, expanded: state.sectionExpanded.pending, empty: '暂无待发版需求' },
         { key: 'releasing', title: '发版中', items: releasing, expanded: state.sectionExpanded.releasing, empty: '暂无发版中需求' },
         { key: 'released', title: '已发版', items: released, expanded: state.sectionExpanded.released, empty: '暂无已发版需求' }
       ]
     })
+
+    // 一旦有需求进入发版中，默认展开一次。
+    // 必须放在 watch 里：写在 sections 内部等于在 computed 里改自己的依赖，
+    // 用户点折叠后重算又被置回 true，「发版中」就永远合不上。
+    watch(
+      () => state.items.filter(i => i.status === 'releasing').length,
+      n => { if (n > 0) state.sectionExpanded.releasing = true },
+    )
 
     const releasingProjects = computed(() => {
       const set = new Map()
@@ -1465,17 +1472,10 @@ createApp({
       // 端口必须在任何接口调用之前确定，否则会打到别的进程上（旧引擎不写端口文件，退回默认值）
       await resolveApiPort()
 
-      // Load data
-      const loaded = await loadFromJsonFile()
-      if (!loaded) {
-        try { state.projectNames = JSON.parse(localStorage.getItem('todo_project_names')) || [] } catch { state.projectNames = [] }
-        try { state.items = JSON.parse(localStorage.getItem('todo_release_data')) || [] } catch { state.items = [] }
-        try { state.branchesCache = JSON.parse(localStorage.getItem('todo_branch_cache')) || {} } catch { state.branchesCache = {} }
-        state.launchBranch = localStorage.getItem('todo_launch_branch') || ''
-      }
-
-      // v2 的三个键始终从 localStorage 读：toDo.json 里没有它们，
-      // 不能因为「已从 json 加载」就跳过，否则人工处置记录每次刷新都会丢
+      // v2 的这几个键始终从 localStorage 读：toDo.json 里没有它们，
+      // 不能因为「已从 json 加载」就跳过，否则人工处置记录每次刷新都会丢。
+      // 必须排在 loadFromJsonFile 之前：setFullData 结尾会无条件回写这几个键，
+      // 那时 state 里还是初始值 {}，会把本地真实记录覆盖成空。
       try { state.branchIndex = JSON.parse(localStorage.getItem(LS_BRANCH_INDEX)) || {} } catch { state.branchIndex = {} }
       try { state.branchLinks = JSON.parse(localStorage.getItem(LS_BRANCH_LINKS)) || {} } catch { state.branchLinks = {} }
       try { state.branchTriage = JSON.parse(localStorage.getItem(LS_BRANCH_TRIAGE)) || {} } catch { state.branchTriage = {} }
@@ -1490,6 +1490,15 @@ createApp({
         // 所以只在「确认是旧的默认模板」时才升级，用户自定义过的模板不动
         if (state.meegleConfig.mqlTemplate === LEGACY_MQL) state.meegleConfig.mqlTemplate = DEFAULT_MQL
       } catch {}
+
+      // Load data
+      const loaded = await loadFromJsonFile()
+      if (!loaded) {
+        try { state.projectNames = JSON.parse(localStorage.getItem('todo_project_names')) || [] } catch { state.projectNames = [] }
+        try { state.items = JSON.parse(localStorage.getItem('todo_release_data')) || [] } catch { state.items = [] }
+        try { state.branchesCache = JSON.parse(localStorage.getItem('todo_branch_cache')) || {} } catch { state.branchesCache = {} }
+        state.launchBranch = localStorage.getItem('todo_launch_branch') || ''
+      }
 
       checkDailyReminder()
       autoFetchBranches()

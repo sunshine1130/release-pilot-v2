@@ -803,7 +803,7 @@ async function handleBranchIndex(req, res, query) {
   const onlyMine = query.get('onlyMine') !== '0'
   const force = query.get('refresh') === '1'
   // repo 与 onlyMine 都必须进缓存键：它们不同则结果不同，不能互相命中
-  const cacheKey = `index:${fullPath}:${base}:${maxCommits}:${repo || ''}:${onlyMine ? 'mine' : 'all'}`
+  const cacheKey = `index:${fullPath}:${base}:${maxCommits}:${maxBranches}:${repo || ''}:${onlyMine ? 'mine' : 'all'}`
   const started = Date.now()
 
   if (!force) {
@@ -868,11 +868,21 @@ const MIME_TYPES = {
 
 function serveStatic(req, res, pathname) {
   let filePath = pathname === '/' ? '/todo-release.html' : pathname
-  filePath = decodeURIComponent(filePath)
-  filePath = path.join(BASE_DIR, filePath)
+  // 解码必须兜住异常：URL 里出现非法转义（如 /%zz）时 decodeURIComponent 会抛 URIError，
+  // 而它在 http handler 里是未捕获异常 → 整个引擎进程直接退出，页面全废
+  try {
+    filePath = decodeURIComponent(filePath)
+  } catch {
+    res.writeHead(400)
+    res.end('Bad Request')
+    return
+  }
+  filePath = path.resolve(BASE_DIR, filePath.replace(/^[/\\]+/, ''))
 
-  // 防目录穿越：必须落在 BASE_DIR 之内
-  if (!filePath.startsWith(BASE_DIR)) {
+  // 防目录穿越：必须落在 BASE_DIR 之内。
+  // 不能用 startsWith(BASE_DIR)：`..\发版小助手-v2-backup` 这类同名前缀的兄弟目录
+  // 字符串上确实以 BASE_DIR 开头，会被放行；必须比到路径分隔符。
+  if (filePath !== BASE_DIR && !filePath.startsWith(BASE_DIR + path.sep)) {
     res.writeHead(403)
     res.end('Forbidden')
     return
@@ -890,7 +900,21 @@ const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true)
   const pathname = parsed.pathname
 
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  // CORS 只放行本机来源：页面同源访问本来就用不到 CORS，
+  // 而无条件 `*` 等于允许用户浏览器里打开的任何网页跨域读本引擎
+  // （接口能列任意本地仓库的分支、还能以本人身份查飞书项目）。
+  // 非本机 Origin 一律拒绝，连「发请求但不读响应」的盲打也一起挡掉 ——
+  // meegle 兜底链路在拿不到 CLI 入口时会走 shell，盲打也可能造成命令注入。
+  const origin = req.headers.origin
+  const isLocalOrigin = !origin || origin === 'null' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  if (!isLocalOrigin) {
+    fail(res, 'FORBIDDEN_ORIGIN', '只接受来自本机页面的请求', 403)
+    return
+  }
+  if (origin && origin !== 'null') {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
@@ -928,7 +952,9 @@ function writePortFile(port) {
 }
 
 function startServer(port) {
-  server.listen(port, () => {
+  // 只监听回环：接口能列任意本地仓库的分支、能按当前身份查飞书项目，
+  // 绑 0.0.0.0 会把它们连同 git ls-remote 的 SSRF 面一起暴露给同网段
+  server.listen(port, '127.0.0.1', () => {
     writePortFile(port)
     console.log(`\n========================================`)
     console.log(`发版小助手 v2 本地引擎已启动`)
@@ -953,6 +979,13 @@ function startServer(port) {
 
   server.on('error', err => {
     if (err.code === 'EADDRINUSE') {
+      // 递归重试前必须先摘掉监听器：startServer 每次都会再注册一个 error 监听，
+      // 不清掉的话第 N 次冲突会触发 N 个 handler，各自再起一轮，端口占用时呈放大式重试
+      server.removeAllListeners('error')
+      if (port >= PORT + 20) {
+        console.error(`端口 ${PORT}~${port} 都被占用，请先关掉占用进程再启动`)
+        process.exit(1)
+      }
       console.log(`端口 ${port} 已被占用，尝试端口 ${port + 1} ...`)
       server.close()
       startServer(port + 1)

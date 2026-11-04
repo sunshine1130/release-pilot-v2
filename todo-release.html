@@ -173,7 +173,7 @@
           <span class="arrow" :class="{open:section.expanded}">▶</span>
           <h2>{{section.title}}</h2>
           <span class="count" :class="'count-'+section.key">{{section.items.length||'0'}}</span>
-          <button v-if="section.key==='releasing'&&section.items.length" class="btn btn-ghost btn-sm" @click="releaseAllToDone">全部发版</button>
+          <button v-if="section.key==='releasing'&&section.items.length" class="btn btn-ghost btn-sm" @click.stop="releaseAllToDone">全部发版</button>
         </div>
         <span style="flex:1"></span>
         <span v-if="section.key==='releasing'" style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">

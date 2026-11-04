@@ -410,9 +410,10 @@ body {
 
 /* ===== Table ===== */
 .table-wrap {
+  /* 只写 overflow-x：简写 overflow:hidden 会把 overflow-x 重置回 hidden，
+     窄窗口下表格再也横向滚不动，右侧「操作」列直接被裁掉 */
   overflow-x: auto;
   border-radius: var(--radius-lg);
-  overflow: hidden;
 }
 table {
   width: 100%;
@@ -611,7 +612,9 @@ input.inline-input {
   transition: max-height var(--transition-slow);
 }
 .collapse-body.expanded {
-  max-height: 4000px;
+  /* 不能用固定上限：未登记分支上百张卡片时单卡片约 40px，4000px 之后的内容
+     会被 overflow:hidden 永久裁掉，尾部按钮点不到 */
+  max-height: none;
 }
 
 /* ===== Tags ===== */
@@ -1412,7 +1415,6 @@ input[data-role="syncProjectName"] {
   padding: 48px 20px;
   color: var(--text-muted);
   font-size: 14px;
-  display: none;
   background: var(--surface-raised);
   border-radius: var(--radius-lg);
 }
