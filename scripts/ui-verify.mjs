@@ -18,11 +18,6 @@ import path from 'node:path'
 import http from 'node:http'
 
 const require = createRequire(import.meta.url)
-const PLAYWRIGHT_CANDIDATES = [
-  'C:/项目/造数据知识库/scripts/pms-web-automation/node_modules/playwright',
-  'C:/Users/leyang312/Documents/deepseek-harness/default-workspace/mgw-7029307841/node_modules/playwright',
-  'playwright',
-]
 
 function loadPlaywright() {
   for (const p of PLAYWRIGHT_CANDIDATES) {
@@ -30,10 +25,29 @@ function loadPlaywright() {
       return require(p)
     } catch {}
   }
-  throw new Error('未找到 playwright，请检查 PLAYWRIGHT_CANDIDATES 里的路径')
+  throw new Error('未找到 playwright，请在 .verify.local.json 的 playwrightPath 里指向它')
 }
 
 const PROJECT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+// 这个脚本要驱动本机真实环境（本地 git 克隆、飞书空间、真实分支与需求ID），
+// 这些配置属于本机私有数据，不进公开仓库：统一放 .verify.local.json（已 gitignore），
+// 仓库里只留 scripts/.verify.local.example.json 模板。
+const ENV_FILE = path.join(PROJECT_DIR, '.verify.local.json')
+if (!fs.existsSync(ENV_FILE)) {
+  console.error(`\n未找到 ${ENV_FILE}`)
+  console.error('请把 scripts/.verify.local.example.json 复制成 .verify.local.json，按你的环境填好后重跑。\n')
+  process.exit(1)
+}
+const ENV = JSON.parse(fs.readFileSync(ENV_FILE, 'utf8'))
+const P = ENV.projects
+const B = ENV.branches
+const R = ENV.requirements
+const MEEGLE = ENV.meegle
+// 必然不可达的 MR 地址：主机名前缀加 unreachable.，用来验证「远端拉不到」时的降级与告警
+const UNREACHABLE_MR = P.main.mr.replace('://', '://unreachable.')
+const PLAYWRIGHT_CANDIDATES = [ENV.playwrightPath, 'playwright'].filter(Boolean)
+
 const results = []
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail })
@@ -50,9 +64,9 @@ const { chromium } = loadPlaywright()
 const PORT = readPort()
 const BASE = `http://localhost:${PORT}`
 
-// 测试用的项目配置：ops-web 同时有 MR 地址与本地路径，才可能算出需求ID
+// 测试用的项目配置：主项目同时配了 MR 地址与本地路径，才可能算出版本覆盖的需求ID
 const SEED_PROJECTS = [
-  { name: 'ops-web', mr: 'https://git.joyintoy.cn/joyin/ops-web', localPath: 'C:\\项目\\ops-web' },
+  { name: P.main.name, mr: P.main.mr, localPath: P.main.localPath },
 ]
 // 两条引用同一条融合分支的需求，刻意用两种不同的「我是谁」来源：
 //   uitest1 走 source.workItemId（将来飞书同步写入的）
@@ -62,25 +76,25 @@ const SEED_ITEMS = [
   {
     id: 'uitest1',
     name: 'UI验证-销售预测',
-    link: 'https://project.feishu.cn/xxx/story/detail/7072591743',
+    link: `https://project.feishu.cn/xxx/story/detail/${R.withManualBranch}`,
     status: 'pending',
-    projects: [{ name: 'ops-web', branch: 'feat/ops四需求合并分支', notes: '' }],
+    projects: [{ name: P.main.name, branch: B.fusion, notes: '' }],
     syncBranches: [],
-    source: { provider: 'meegle', workItemId: '7072591743' },
+    source: { provider: 'meegle', workItemId: R.withManualBranch },
   },
   {
     id: 'uitest2',
     name: 'UI验证-老数据形态',
-    link: 'https://project.feishu.cn/xxx/story/detail/7029460314',
+    link: `https://project.feishu.cn/xxx/story/detail/${R.legacyNoSource}`,
     status: 'pending',
-    projects: [{ name: 'ops-web', branch: 'feat/ops四需求合并分支', notes: '' }],
+    projects: [{ name: P.main.name, branch: B.fusion, notes: '' }],
     syncBranches: [],
   },
   {
     // 这条不手工挂分支，只靠需求ID（从链接里提）等索引自动匹配 —— 验证「自动匹配」建议
     id: 'uitest4',
     name: 'UI验证-待挂分支',
-    link: 'https://project.feishu.cn/xxx/story/detail/6984365400',
+    link: `https://project.feishu.cn/xxx/story/detail/${R.noBranchId}`,
     status: 'pending',
     projects: [],
     syncBranches: [],
@@ -89,22 +103,22 @@ const SEED_ITEMS = [
     // 这条的需求ID 落在飞书 oms 类型第一页，用来验证「已导入」标记
     id: 'uitest3',
     name: 'UI验证-已导入需求',
-    link: 'https://project.feishu.cn/ly_oms/oms/detail/7154016953',
+    link: `https://project.feishu.cn/${MEEGLE.simpleName}/oms/detail/${R.existingImported}`,
     status: 'new',
     projects: [],
     syncBranches: [],
   },
 ]
 
-// 同步配置预置：真实空间 ly_oms，只选 story + oms 两类、每类只拉一页，
+// 同步配置预置：一个真实空间、两类工作项、每类只拉一页，
 // 把验证控制在 4 次 meegle 调用以内
 const MEEGLE_CONFIG = {
-  projectKey: '6629becdcfea521fda9b97e4',
-  simpleName: 'ly_oms',
-  spaceName: '信息部工作汇总',
-  typeApiNames: ['story', 'oms'],
+  projectKey: MEEGLE.projectKey,
+  simpleName: MEEGLE.simpleName,
+  spaceName: MEEGLE.spaceName,
+  typeApiNames: MEEGLE.typeApiNames,
   mqlTemplate: 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`',
-  maxPerType: 50,
+  maxPerType: MEEGLE.maxPerType,
 }
 
 const browser = await chromium.launch()
@@ -217,36 +231,37 @@ try {
     (await page.locator('.unreg-panel .collapse-body.expanded').count()) === 0)
   await page.locator('.unreg-panel .hint', { hasText: '条分支查不到需求登记' }).waitFor({ timeout: 180000 })
   await expandUnreg()
-  await page.getByText('feat/mdm二期分支').first().waitFor({ timeout: 60000 })
+  await page.getByText(B.unregistered).first().waitFor({ timeout: 60000 })
 
   check(
     '索引请求打到本引擎端口',
     apiCalls.some(u => u.includes(`localhost:${PORT}/api/git/branch-index`)),
     `端口 ${PORT}`,
   )
-  check('未登记分支区出现 target 分支', (await page.getByText('feat/mdm二期分支').count()) > 0)
-  check('未登记分支带项目标签', (await page.getByText(/ops-web · \d+/).count()) > 0)
+  check('未登记分支区出现 target 分支', (await page.getByText(B.unregistered).count()) > 0)
+  check('未登记分支带项目标签', (await page.getByText(new RegExp(P.main.name + ' · \\d+')).count()) > 0)
 
   // 3b) 未登记分支搜索：分支名与项目名都能匹配，无命中时给明确空态（而不是「暂无未登记分支」）
   const unregSearch = page.locator('.unreg-panel .unreg-toolbar input')
   const unregCards = page.locator('.unreg-card')
   const totalUnreg = await unregCards.count()
   check('未登记分支提供搜索框', (await unregSearch.count()) === 1)
-  await unregSearch.fill('mdm二期')
+  await unregSearch.fill(B.unregisteredKeyword)
   await page.waitForTimeout(300)
   check('按分支名筛选',
-    (await unregCards.count()) === 1 && (await unregSearch.inputValue()) === 'mdm二期',
+    (await unregCards.count()) === 1 && (await unregSearch.inputValue()) === B.unregisteredKeyword,
     `命中 ${await unregCards.count()} 张 / 共 ${totalUnreg}`)
   check('搜索命中数在面板上可见',
     (await page.locator('.unreg-toolbar .hint').textContent() || '').includes(`1/${totalUnreg}`))
   await page.locator('.unreg-panel').screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-unreg-search.png') })
 
-  await unregSearch.fill('ops-web')
+  await unregSearch.fill(P.main.name)
   await page.waitForTimeout(300)
   const byProject = await unregCards.count()
-  const allOpsOnly = await unregCards.evaluateAll(els =>
-    els.every(el => [...el.querySelectorAll('.project-tag')].some(t => t.textContent.includes('ops-web'))))
-  check('按项目名筛选', byProject > 0 && allOpsOnly, `命中 ${byProject} 张，且都含 ops-web 标签`)
+  // 注意 evaluateAll 的回调在浏览器里执行，取不到 Node 侧的 P —— 值必须当参数传进去
+  const allOpsOnly = await unregCards.evaluateAll((els, proj) =>
+    els.every(el => [...el.querySelectorAll('.project-tag')].some(t => t.textContent.includes(proj))), P.main.name)
+  check('按项目名筛选', byProject > 0 && allOpsOnly, `命中 ${byProject} 张，且都含 ${P.main.name} 标签`)
 
   await unregSearch.fill('zzz-不存在的分支')
   await page.waitForTimeout(300)
@@ -261,11 +276,11 @@ try {
 
   // 4) 影响面提示：期望值从实际索引算，不能写死。
   //    这条分支仍在长（实测 10-29 是 4 个ID、11-03 已经 6 个），写死数字必然过几天就红
-  const expectedOthers = await page.evaluate(() => {
+  const expectedOthers = await page.evaluate(({ proj, branch }) => {
     const idx = JSON.parse(localStorage.getItem('todo_branch_index') || '{}')
-    const entry = idx['ops-web'] && idx['ops-web'].branches && idx['ops-web'].branches['feat/ops四需求合并分支']
+    const entry = idx[proj] && idx[proj].branches && idx[proj].branches[branch]
     return ((entry && entry.ids) || []).length - 1
-  })
+  }, { proj: P.main.name, branch: B.fusion })
   const impacts = await page.getByText(/还覆盖 \d+ 个需求/).allTextContents()
   check('影响面提示数量正确（两条需求都命中）',
     expectedOthers > 0 && impacts.length === 2 && impacts.every(t => new RegExp(`还覆盖 ${expectedOthers} 个需求`).test(t)),
@@ -279,7 +294,7 @@ try {
   await chips.first().waitFor({ timeout: 30000 })
   const chipText = (await chips.first().textContent() || '').trim()
   check('需求行显示自动匹配的建议分支',
-    chipText.includes('ops-web') && chipText.includes('feat/ops四需求合并分支'), chipText)
+    chipText.includes(P.main.name) && chipText.includes(B.fusion), chipText)
   check('已手工挂过的分支不再重复建议',
     (await page.locator('tr', { hasText: 'UI验证-销售预测' }).locator('.branch-suggest').count()) === 0)
   // 截图前先把行滚到视口里：按 boundingBox 裁切时，行若在视口底部，裁出来只有几像素
@@ -304,7 +319,7 @@ try {
     const it = items.find(i => i.name === 'UI验证-待挂分支')
     return ((it && it.projects) || []).map(p => `${p.name}|${p.branch}`)
   })
-  check('采用建议后落盘', persisted.includes('ops-web|feat/ops四需求合并分支'), persisted.join(' , '))
+  check('采用建议后落盘', persisted.includes(`${P.main.name}|${B.fusion}`), persisted.join(' , '))
 
   // 4c) 同一项目已经挂了别的分支时，建议必须**追加一行**而不是要求用户自己去切换：
   //     一条需求的代码同时落在同仓库两条分支上是真实形态（融合分支 merge 了按需求命名的分支）
@@ -314,27 +329,27 @@ try {
   await page.waitForTimeout(400)
   const tagsAfter = (await row2.locator('.branch-text').allTextContents()).map(s => s.trim())
   check('已有分支时点建议是追加而不是让用户切换',
-    tagsBefore === 1 && tagsAfter.length === 2 && tagsAfter.includes('feat/ops四需求合并分支'),
+    tagsBefore === 1 && tagsAfter.length === 2 && tagsAfter.includes(B.fusion),
     `${tagsBefore} → ${tagsAfter.join(' + ')}`)
   check('追加同时给出实际挂上的提示',
-    (await page.locator('.toast.show', { hasText: '已挂上 ops-web' }).count()) > 0)
+    (await page.locator('.toast.show', { hasText: '已挂上 ' + P.main.name }).count()) > 0)
   const persisted2 = await page.evaluate(() => {
     const items = JSON.parse(localStorage.getItem('todo_release_data') || '[]')
     const it = items.find(i => i.name === 'UI验证-老数据形态')
     return ((it && it.projects) || []).map(p => `${p.name}|${p.branch}`)
   })
   check('追加后两个分支都在（原分支没被覆盖）',
-    persisted2.includes('ops-web|feat/ops四需求合并分支') && persisted2.includes('ops-web|feat/7029460314销售预测迭代'),
+    persisted2.includes(`${P.main.name}|${B.fusion}`) && persisted2.includes(`${P.main.name}|${B.requirementNamed}`),
     persisted2.join(' , '))
   await row2.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-suggest-append.png') })
 
   // 5) 处置：点「无需需求」后该分支卡片消失
   //    断言必须落在卡片本身：getByText 会同时匹配到外层容器，用文本计数会误判
   const cardOf = n => page.locator('.unreg-card', { hasText: n })
-  const beforeCount = await cardOf('feat/mdm二期分支').count()
-  await cardOf('feat/mdm二期分支').getByRole('button', { name: '无需需求' }).click()
+  const beforeCount = await cardOf(B.unregistered).count()
+  await cardOf(B.unregistered).getByRole('button', { name: '无需需求' }).click()
   await page.waitForTimeout(300)
-  const afterCount = await cardOf('feat/mdm二期分支').count()
+  const afterCount = await cardOf(B.unregistered).count()
   check('处置后卡片移除', beforeCount === 1 && afterCount === 0, `卡片数 ${beforeCount} → ${afterCount}`)
   check('出现「已处置」记录', (await page.getByText(/已处置 \d+ 条/).count()) > 0)
 
@@ -342,13 +357,13 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(600)
   check('刷新后处置状态保持',
-    (await cardOf('feat/mdm二期分支').count()) === 0 && (await page.getByText(/已处置 \d+ 条/).count()) > 0)
+    (await cardOf(B.unregistered).count()) === 0 && (await page.getByText(/已处置 \d+ 条/).count()) > 0)
 
   // 7) 恢复（上一步 reload 过，面板回到默认收起态，点之前要先展开）
   await expandUnreg()
   await page.getByRole('link', { name: '恢复' }).first().click()
   await page.waitForTimeout(300)
-  check('恢复后卡片回来', (await cardOf('feat/mdm二期分支').count()) === 1)
+  check('恢复后卡片回来', (await cardOf(B.unregistered).count()) === 1)
 
   // ===== 8) 飞书项目同步（真实调用 meegle CLI）=====
   // 两个弹窗共用 .sync-box，选择器必须按容器区分，否则 Playwright 严格模式会因多匹配报错
@@ -365,18 +380,18 @@ try {
   }
 
   await page.evaluate(
-    ({ cfg, branchId }) => {
+    ({ cfg, branchId, proj }) => {
       localStorage.setItem('todo_meegle_config', JSON.stringify(cfg))
       // 合成一条覆盖某真实需求的跨需求分支，让「自动挂分支」这条链路可以被确定性断言
       // （真实索引里符合条件的分支不在飞书列表第一页）
       const idx = JSON.parse(localStorage.getItem('todo_branch_index') || '{}')
-      idx['ops-web'] = idx['ops-web'] || { branches: {}, unregistered: [] }
-      idx['ops-web'].branches['feat/测试-跨需求分支'] = {
+      idx[proj] = idx[proj] || { branches: {}, unregistered: [] }
+      idx[proj].branches['feat/测试-跨需求分支'] = {
         ids: [branchId], commits: 2, lastDate: '2026-11-03', merged: false,
       }
       localStorage.setItem('todo_branch_index', JSON.stringify(idx))
     },
-    { cfg: MEEGLE_CONFIG, branchId: '7153729281' },
+    { cfg: MEEGLE_CONFIG, branchId: R.l1Matched, proj: P.main.name },
   )
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(500)
@@ -437,14 +452,20 @@ try {
   await page.waitForTimeout(200)
   check('再次点击分组头展开', (await previewBox.locator('.sync-row').count()) === rowsBeforeCollapse)
 
-  const l1 = await previewBox.locator('.sync-row', { hasText: '7153729281' }).locator('.sync-branch.via-L1').count()
+  const l1 = await previewBox.locator('.sync-row', { hasText: R.l1Matched }).locator('.sync-branch.via-L1').count()
   check('按需求ID自动匹配到分支（L1）', l1 > 0)
   await page.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-sync.png'), fullPage: false })
 
   await setOnlyUnregistered(false)
   await page.waitForTimeout(200)
-  const doneTag = await previewBox.locator('.sync-row', { hasText: '7154016953' }).locator('.sync-tag-done').count()
-  check('已导入的需求被标记', doneTag > 0)
+  // 断言要落在结构上而不是写死某条ID：飞书里的需求一直在滚动，
+  // 固定的ID随时可能被挤出第一页（已实测发生过），那样断言就会假红。
+  const doneRows = await previewBox.locator('.sync-row .sync-tag-done').count()
+  const seededRow = previewBox.locator('.sync-row', { hasText: R.existingImported })
+  const seededInPage = (await seededRow.count()) > 0
+  const seededTagged = seededInPage ? (await seededRow.locator('.sync-tag-done').count()) > 0 : null
+  check('已导入的需求被标记', doneRows > 0 && seededTagged !== false,
+    `标记 ${doneRows} 行${seededInPage ? `（含种子ID）` : '（种子ID不在本页，按结构断言）'}`)
 
   const firstNewId = ((await previewBox.locator('.sync-row:not(.existing) .sync-id').first().textContent()) || '').trim()
   await previewBox.getByRole('button', { name: '全选新增' }).click()
@@ -509,12 +530,12 @@ try {
 
   // 往导出文件里加一条「无需需求」处置再导入：验证新增字段能真正被应用并落盘
   exported.branchTriage = exported.branchTriage || {}
-  exported.branchTriage['ops-web\u0000feat/mdm二期分支'] = { action: 'exempt', at: Date.now() }
+  exported.branchTriage[`${P.main.name}\u0000${B.unregistered}`] = { action: 'exempt', at: Date.now() }
   const importPath = path.join(PROJECT_DIR, '.tmp-import.json')
   fs.writeFileSync(importPath, JSON.stringify(exported))
   await page.locator('input[type=file]').setInputFiles(importPath)
   await page.waitForTimeout(1000)
-  check('导入后处置生效（该分支卡片消失）', (await cardOf('feat/mdm二期分支').count()) === 0)
+  check('导入后处置生效（该分支卡片消失）', (await cardOf(B.unregistered).count()) === 0)
   check('导入后需求数据仍在', (await page.locator('h1 .sub').textContent() || '').includes('共'))
   fs.unlinkSync(importPath)
 
@@ -698,7 +719,7 @@ try {
   console.log(`\n截图已保存: docs/ui-verify.png`)
 
   // ===== 12) 分支匹配的前置条件诊断（用户实际踩到的场景）=====
-  // 真实事故：需求 7134246577 在 pms-web 上明明有分支，预览却逐行显示「未匹配到分支」。
+  // 真实事故：某条需求在第二个项目上明明有分支，预览却逐行显示「未匹配到分支」。
   // 原因是索引没生成/项目没配 —— 但这被逐行文案伪装成了「单条需求的事实」。
   // 12a 没有任何项目时，必须说明真实原因，不能再逐行谎报
   await page.evaluate(() => {
@@ -721,45 +742,40 @@ try {
   await previewBox.locator('.sync-header .btn-close').click()
   await page.waitForTimeout(200)
 
-  // 12b 配上 pms-web（MR 地址 + 本地路径）后，7134246577 必须能匹配到它的真实分支
-  await page.evaluate(() => {
+  // 12b 配上第二个项目（MR 地址 + 本地路径）后，那条需求必须能匹配到它的真实分支
+  await page.evaluate((proj) => {
     const t = new Date()
     const d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
     localStorage.setItem('todo_last_remind_date', d)
-    localStorage.setItem('todo_project_names', JSON.stringify([
-      { name: 'pms-web', mr: 'https://git.joyintoy.cn/joyin/pms-web', localPath: 'C:\\项目\\pms-web' },
-    ]))
+    localStorage.setItem('todo_project_names', JSON.stringify([proj]))
     localStorage.setItem('todo_branch_index', '{}')
-  })
+  }, { name: P.other.name, mr: P.other.mr, localPath: P.other.localPath })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: '同步飞书项目' }).click()
   await previewBox.getByPlaceholder('按名称或需求ID筛选...').waitFor({ timeout: 300000 })
-  // 前序阶段已经导入过约 100 条，7134246577 很可能就在其中，需要看得见它才能验证分支匹配
+  // 前序阶段已经导入过上百条，这条需求很可能就在其中，需要看得见它才能验证分支匹配
   await setOnlyUnregistered(false)
-  await previewBox.getByPlaceholder('按名称或需求ID筛选...').fill('7134246577')
+  await previewBox.getByPlaceholder('按名称或需求ID筛选...').fill(R.pmsBranchOwning)
   await page.waitForTimeout(800)
   await previewBox.locator('.sync-branch').first().waitFor({ timeout: 60000 })
   const matched = ((await previewBox.locator('.sync-branch').first().textContent()) || '').trim()
-  check('配置 pms-web 后 7134246577 能匹配到分支', /pms-web/.test(matched), matched)
+  check(`配置 ${P.other.name} 后 ${R.pmsBranchOwning} 能匹配到分支`, matched.includes(P.other.name), matched)
   check('配置齐全时不再显示前置条件提示', (await previewBox.locator('.sync-note').count()) === 0)
   await previewBox.locator('.sync-header .btn-close').click()
   await page.waitForTimeout(200)
 
   // ===== 13) 分支索引只保留自己创建的分支 =====
-  // 用 auth-web 做试金石：它当前的非主线分支全部属于钱龙 / licheng / Liujiangbei，
-  // 而 ops-web / pms-web / scm-web 的分支清一色是自己 —— 拿它才能验证过滤真的生效。
-  await page.evaluate(() => {
+  // 挑一个「非主线分支全部属于他人」的项目做试金石：拿它才能验证创建者过滤真的生效。
+  await page.evaluate((proj) => {
     const t = new Date()
     const d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
     localStorage.setItem('todo_last_remind_date', d)
-    localStorage.setItem('todo_project_names', JSON.stringify([
-      { name: 'auth-web', mr: 'https://git.joyintoy.cn/joyin/auth-web', localPath: 'C:\\项目\\auth-web' },
-    ]))
+    localStorage.setItem('todo_project_names', JSON.stringify([proj]))
     localStorage.setItem('todo_branch_index', '{}')
     localStorage.setItem('todo_branch_triage', '{}')
     localStorage.setItem('todo_index_config', JSON.stringify({ onlyMine: true }))
-  })
+  }, { name: P.mine.name, mr: P.mine.mr, localPath: P.mine.localPath })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(500)
 
@@ -784,13 +800,11 @@ try {
   // ===== 13) 索引降级必须可见 =====
   // 远端分支列表取不到时不会报错，只退化成「本地 ref 全算数」——
   // 本地那些远端已删除的旧分支会全部变成未登记分支。这种静默降级必须显示出来。
-  await page.evaluate(() => {
-    localStorage.setItem('todo_project_names', JSON.stringify([
-      { name: 'ops-web', mr: 'https://git.joyintoy.invalid/joyin/ops-web', localPath: 'C:\\项目\\ops-web' },
-    ]))
+  await page.evaluate((proj) => {
+    localStorage.setItem('todo_project_names', JSON.stringify([proj]))
     localStorage.setItem('todo_branch_index', '{}')
     localStorage.setItem('todo_index_config', JSON.stringify({ onlyMine: false }))
-  })
+  }, { name: P.main.name, mr: UNREACHABLE_MR, localPath: P.main.localPath })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: '刷新分支索引' }).click()

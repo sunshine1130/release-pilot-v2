@@ -96,7 +96,7 @@ createApp({
         typeApiNames: [],
         mqlTemplate: 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`{statusFilter}',
         maxPerType: 200,
-        // 已完成的需求不该出现在发版清单里。实测 ly_oms 的 story 表 805 条中
+        // 已完成的需求不该出现在发版清单里。实测 your_space 的 story 表 805 条中
         // 已结束 335 + 已上线 412，真正还在流程中的只有 58 条 —— 不排除的话，
         // 拉回来的绝大部分是废数据，还会把 maxPerType 的额度占满。
         excludeStatuses: ['已结束', '已上线'],
@@ -1103,7 +1103,7 @@ createApp({
      *
      * 优先用同步写入的 source.workItemId；老数据（手工录入的）没有该字段，
      * 就从需求链接里提 —— 飞书需求详情链接天然以 work_item_id 结尾
-     * （/xxx/story/detail/7134246577）。不这样做的话，影响面提示对历史需求全部失效，
+     * （/xxx/story/detail/7000000012）。不这样做的话，影响面提示对历史需求全部失效，
      * 而历史需求恰恰是最容易漏发的那批。
      */
     function selfWorkItemId(item) {
@@ -1218,7 +1218,7 @@ createApp({
     //
     // 同步是「消掉手工贴标题+链接」的主力：一次拉一批、去重、并按需求ID自动挂上分支。
     // 关键前提：一个空间里「需求管理」类工作项是按业务域拆成多张表的
-    // （实测 ly_oms 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 张），
+    // （实测 your_space 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 张），
     // 所以类型是多选，只查一张会静默漏掉其他域的全部需求。
 
     // {statusFilter} 由服务端按「该类型实际存在的状态」生成（见 server.js meegleQueryAll）。
@@ -1242,7 +1242,7 @@ createApp({
       try { localStorage.setItem(LS_MEEGLE_CONFIG, JSON.stringify(state.meegleConfig)) } catch {}
     }
 
-    /** 提取文本里的 10 位需求ID（带数字边界，避免 7101366806 命中 17101366806） */
+    /** 提取文本里的 10 位需求ID（带数字边界，避免 1234567890 命中 11234567890） */
     function extractReqIds(text) {
       const out = []
       const re = /(^|[^0-9])([0-9]{10})([^0-9]|$)/g
@@ -1523,7 +1523,7 @@ createApp({
      * 「为什么没匹配到分支」的说明。
      *
      * 逐行显示「未匹配到分支」会把一个全局前置条件问题伪装成单条需求的事实 ——
-     * 用户看到 7134246577 明明在 pms-web 有分支却显示未匹配，第一反应只会是工具坏了。
+     * 用户看到 7000000012 明明在 pms-web 有分支却显示未匹配，第一反应只会是工具坏了。
      * 这里把真正的原因（没配项目 / 没配本地路径 / 索引没算 / 索引没覆盖全部项目）讲出来。
      */
     const syncIndexHint = computed(() => {

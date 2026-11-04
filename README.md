@@ -62,6 +62,7 @@ start-server.bat                 启动入口
 使用说明.html                     面向使用者的文档
 docs/                            技术方案与接口/算法/数据模型/实现设计文档
 scripts/ui-verify.mjs            Playwright 真实浏览器验证脚本
+scripts/.verify.local.example.json  验证脚本的环境配置模板（真实配置放 .verify.local.json，已 gitignore）
 更新.bat                          一键 git pull（引擎没起来时用；页面里点版本号也行）
 backup/                          「备份」按钮写出的数据备份（.gitignore 已排除，不提交）
 ```
@@ -79,9 +80,14 @@ backup/                          「备份」按钮写出的数据备份（.giti
 ## 验证
 
 ```bash
-node server.js                       # 另开一个终端
-node scripts/ui-verify.mjs           # 真实浏览器跑 99 项断言（含引擎级安全回归与备份落盘往返）
+node server.js                                              # 另开一个终端
+cp scripts/.verify.local.example.json .verify.local.json    # 首次：按你的环境填写
+node scripts/ui-verify.mjs                                  # 真实浏览器跑 104 项断言
 ```
+
+脚本要驱动**本机真实环境**（本地 git 克隆、飞书空间、真实分支与需求 ID），这些属于私有数据，
+所以统一放在 `.verify.local.json`（已 gitignore）——仓库里只有 `scripts/.verify.local.example.json` 模板。
+缺配置时脚本会直接提示怎么建，不会跑一半失败。
 
 覆盖：页面渲染、端口跟随、分支索引、未登记分支处置与持久化、影响面提示、飞书同步（真实调用 CLI）、按需求ID去重、导出/导入往返、备份落盘与恢复往返、版本徽标与更新检查、引擎级安全回归（非法转义/目录穿越/跨域），以及 v1 主路径回归。
 

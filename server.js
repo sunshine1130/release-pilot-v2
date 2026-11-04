@@ -285,7 +285,7 @@ async function meegleQueryPage({ projectKey, mql, sessionId, groupId, pageNum })
  * 跨多个工作项类型拉需求。
  *
  * 为什么要跨类型：一个空间里「需求管理」类工作项是**按业务域拆成独立表**的
- * （实测 ly_oms 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 个），
+ * （实测 your_space 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 个），
  * 只查其中一张会静默漏掉其他域的全部需求 —— 而这正是发版要收集的东西。
  */
 async function meegleQueryAll({ projectKey, simpleName, types, mqlTemplate, excludeStatuses, maxPerType }) {
@@ -464,7 +464,7 @@ function isEnvBranch(name) {
 /**
  * 从提交标题里提取需求ID。
  *
- * 必须带数字边界：不同长度的 ID 可能互为子串（如 7101366806 出现在 17101366806 里），
+ * 必须带数字边界：不同长度的 ID 可能互为子串（如 1234567890 出现在 11234567890 里），
  * 不加边界会关联到别人身上。
  */
 const REQ_ID_RE = /(^|[^0-9])([0-9]{10})([^0-9]|$)/g
@@ -535,7 +535,7 @@ function parseLsRemote(out) {
  * 算法要点（全部是实测教训，改动前请先看 docs/技术文档-关联算法规格.md）：
  *   1. 基线固定为发布主线。实测「在所有主线里取独占提交最少者」是错的 ——
  *      会把基线选到已经吸收了该分支的 dev 上，单个分支从 256 个提交塌缩成 1 个，需求ID 全丢。
- *   2. 必须用 --first-parent。分支之间会互相 merge（如 feat/7101366806 merge 了 feat/mdm三期分支），
+ *   2. 必须用 --first-parent。分支之间会互相 merge（如 feat/7000000010 merge 了 feat/mdm三期分支），
  *      不加会把兄弟分支的工作算成自己的。
  *   3. 必须排除基线区间（mb..branch）。直接 log 整个分支会把从 dev/master 继承的上游提交
  *      全算进来，实测一条分支能冒出 9 个别人的需求ID。
@@ -545,7 +545,7 @@ function parseLsRemote(out) {
  * 取当前仓库的提交身份（user.name / user.email）。
  *
  * 用来判断一条分支是不是「我创建的」——同事的分支混进未登记列表和匹配结果里纯是噪声：
- * 实测 auth-web 的 6 条活跃分支全部属于钱龙 / licheng / Liujiangbei，而
+ * 实测 auth-web 的 6 条活跃分支全部属于其他同事，而
  * ops-web / pms-web / scm-web / aps-web 的分支清一色是自己。
  */
 async function gitIdentity(cwd) {

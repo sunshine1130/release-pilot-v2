@@ -19,8 +19,8 @@
 | 验证项 | 命令 | 结果 |
 |---|---|---|
 | 飞书项目 CLI 可用 | `meegle auth status` | CLI 已装，host=`project.feishu.cn`，**未登录**（`no local token`） |
-| GitLab API 存活 | `GET http://git.joyintoy.cn/api/v4/version` | 401（服务正常，缺 token） |
-| **分支直读（零凭据）** | `git ls-remote --heads https://git.joyintoy.cn/joyin/pms-web.git` | **exit=0，40 个分支，1.29s** ✅ |
+| GitLab API 存活 | `GET http://git.example.com/api/v4/version` | 401（服务正常，缺 token） |
+| **分支直读（零凭据）** | `git ls-remote --heads https://git.example.com/your-group/pms-web.git` | **exit=0，40 个分支，1.29s** ✅ |
 | 并发 5 仓 | 5 个 `ls-remote` 并发 | 总计 2.9s |
 | GitLab API 匿名访问 | `GET /api/v4/projects/joyin%2Fpms-web/repository/branches` | 404（私有项目） |
 | 复用 git 凭据调 API | basic auth / `PRIVATE-TOKEN` | **401 全部失败**（存的是 8 位账号密码，不是 PAT） |
@@ -43,13 +43,13 @@ git log --format=%s origin/feat/TextSearch组件优化 | grep -oE '[0-9]{10}' | 
 → 9 个 ID，几乎全是别人的需求
 
 # ✗ 坑2：只排除基线但不用 --first-parent —— 会把分支 merge 进来的兄弟分支算成自己的
-#    （实测 feat/7101366806默认规则属性配置 merge 了 feat/mdm三期分支）
+#    （实测 feat/7000000010默认规则属性配置 merge 了 feat/mdm三期分支）
 
 # ✓ 正解
 base=$(git merge-base origin/master "origin/feat/ops四需求合并分支")
 git log --first-parent --format=%s "$base..origin/feat/ops四需求合并分支"
       | grep -oE '(^|[^0-9])[0-9]{10}([^0-9]|$)' | sort -u
-→ 7029460314 7058457690 7072591743 7073079049   ← 正好 4 个，与「四需求」吻合 ✅
+→ 7000000005 7000000007 7000000008 7000000009   ← 正好 4 个，与「四需求」吻合 ✅
 ```
 
 **2）基线必须固定为发布主线，不能用「取独占提交最少」的启发式（v2 的算法错误）**
@@ -58,9 +58,9 @@ v2 写的「对候选主线取独占提交数最少者」实测会**把分支真
 
 | 分支 | base=master (全部/fp) | base=dev (全部/fp) | base=mdmdev (全部/fp) |
 |---|---|---|---|
-| `pms-web feat/7101366806默认规则属性配置` | **256 / 80** → `7048154426 7101366806` ✅ | 184 / 38 → 只有 `7101366806` | **1 / 1 → 0 个 ID** ❌ |
+| `pms-web feat/7000000010默认规则属性配置` | **256 / 80** → `7000000006 7000000010` ✅ | 184 / 38 → 只有 `7000000010` | **1 / 1 → 0 个 ID** ❌ |
 | `ops-web feat/ops四需求合并分支` | **19 / 8** → 4 个 ID ✅ | 2 / 2 → 只有 1 个 ID ❌ | 19 / 8 → 4 个 ✅ |
-| `aps-web feat/6929850538中台重构二期` | 1 / 1 → 无 ID | 1 / 1 → 无 ID | 1 / 1 → 无 ID |
+| `aps-web feat/7000000001中台重构二期` | 1 / 1 → 无 ID | 1 / 1 → 无 ID | 1 / 1 → 无 ID |
 
 取"最少"会把 base 选到已经吸收了该分支的 dev/mdmdev 上，导致只看到 1 个提交、0 个 ID。**必须固定用发布主线 `master`（可配优先级），并配合 `--first-parent`。**
 
@@ -69,8 +69,8 @@ v2 写的「对候选主线取独占提交数最少者」实测会**把分支真
 实测中大量**分支名带 ID、但 commit message 没写 ID** 的分支（作者没按规范写提交信息）：
 
 ```
-aps-web  feat/6929850538中台重构二期   → message: "refactor(采购计划): 修改采购订单跳转逻辑"   无 ID
-scm-web  feat/7128829743费用单新增批量驳回按钮 → message: "feat: 增加批量驳回功能并重构批量操作逻辑"  无 ID
+aps-web  feat/7000000001中台重构二期   → message: "refactor(采购计划): 修改采购订单跳转逻辑"   无 ID
+scm-web  feat/7000000011费用单新增批量驳回按钮 → message: "feat: 增加批量驳回功能并重构批量操作逻辑"  无 ID
 ```
 
 这两个都是**近期活跃**分支（2026-05-07 / 2026-09-30）。全仓统计里 **L2 单独补位 14 个**（aps-web 一家就 8 个）。所以 L1 ∪ L2，UI 上标注各自来源与置信度。
@@ -221,7 +221,7 @@ aps-web  2026-08-24  feat/tms环境变量添加mdm前缀         first-parent �
 
 三个必须遵守的点（均为实测教训）：
 
-1. **`--first-parent` 不能省**：分支会互相 merge（实测 `feat/7101366806默认规则属性配置` merge 了 `feat/mdm三期分支`），不加会把兄弟分支的工作算到自己头上。
+1. **`--first-parent` 不能省**：分支会互相 merge（实测 `feat/7000000010默认规则属性配置` merge 了 `feat/mdm三期分支`），不加会把兄弟分支的工作算到自己头上。
 2. **base 固定为发布主线**：不要在多条主线里挑「独占提交最少」的（会把 base 选到已吸收该分支的 dev 上，实测导致 0 个 ID）。
 3. **数字边界**：用 `(^|[^0-9])[0-9]{10}([^0-9]|$)`，防止子串误命中。
 
@@ -230,12 +230,12 @@ aps-web  2026-08-24  feat/tms环境变量添加mdm前缀         first-parent �
 ```js
 // 正向：分支 → 覆盖的需求
 branchIndex['ops-web']['feat/ops四需求合并分支'] = {
-  ids: ['7029460314','7058457690','7072591743','7073079049'],
+  ids: ['7000000005','7000000007','7000000008','7000000009'],
   base: 'origin/master', commits: 8, lastDate: '2026-05-11', via: 'L1'
 }
 // 反向：需求ID → 所有 (项目, 分支)
-reqToBranches['7029460314'] = [
-  { project: 'ops-web', branch: 'feat/7029460314销售预测迭代', via: 'L1' },
+reqToBranches['7000000005'] = [
+  { project: 'ops-web', branch: 'feat/7000000005销售预测迭代', via: 'L1' },
   { project: 'ops-web', branch: 'feat/ops四需求合并分支',        via: 'L1' }
 ]
 ```
@@ -269,16 +269,16 @@ reqToBranches['7029460314'] = [
 
 数据模型无需为融合分支加新结构：`item.projects` 本来就是数组，**一个需求挂多个分支是既有能力**。融合分支被 4 条需求引用时，就是 4 条需求行各自带同一个 `{name, branch}`。
 
-**影响面提示（建议做）**：分支标签上显示「**此分支还服务：7058457690 / 7072591743 / 7073079049**」。发版时一眼看出这次改动会带上谁，防漏发/误发。这条在实测中得到强化——`feat/7101366806默认规则属性配置` 的 first-parent 提交里除自身外还带出 `7048154426`，即**分支名只写了一个需求，代码里实际覆盖两个**，靠 L2 永远发现不了。
+**影响面提示（建议做）**：分支标签上显示「**此分支还服务：7000000007 / 7000000008 / 7000000009**」。发版时一眼看出这次改动会带上谁，防漏发/误发。这条在实测中得到强化——`feat/7000000010默认规则属性配置` 的 first-parent 提交里除自身外还带出 `7000000006`，即**分支名只写了一个需求，代码里实际覆盖两个**，靠 L2 永远发现不了。
 
 ### 4.5 典型场景对照（实测）
 
 | 分支 | 类型 | L1（first-parent） | 结论 |
 |---|---|---|---|
 | `feat/ops四需求合并分支` | 融合分支 | 4 个 ID | L1 精准 ✅ |
-| `feat/7101366806默认规则属性配置` | 单需求分支（还覆盖另一个需求） | `7048154426 7101366806` | L1 发现隐藏覆盖 ✅ |
-| `feat/7029460314销售预测迭代` | 单需求分支 | `7029460314` | 与分支名自校验一致 ✅ |
-| `feat/6929850538中台重构二期` | 提交信息未写ID | 无 | **L2 补位** ✅ |
+| `feat/7000000010默认规则属性配置` | 单需求分支（还覆盖另一个需求） | `7000000006 7000000010` | L1 发现隐藏覆盖 ✅ |
+| `feat/7000000005销售预测迭代` | 单需求分支 | `7000000005` | 与分支名自校验一致 ✅ |
+| `feat/7000000001中台重构二期` | 提交信息未写ID | 无 | **L2 补位** ✅ |
 | `fix/渠道下拉框数据错误` | 已合入主线 | fp 提交 0 | 跳过，噪声归零 ✅ |
 | `feat/mdm二期分支` | 需求未出/需求太多 | 无 | **未登记分支**，走 G5 ✅ |
 
@@ -294,7 +294,7 @@ reqToBranches['7029460314'] = [
   // ↓ 新增，可选；旧数据没有该字段，完全兼容
   source: {
     provider: 'meegle', projectKey: 'xxx', simpleName: 'xxx',
-    workItemType: 'story', workItemId: '7134246577', syncedAt: 1761700000000
+    workItemType: 'story', workItemId: '7000000012', syncedAt: 1761700000000
   }
 }
 ```
@@ -304,7 +304,7 @@ reqToBranches['7029460314'] = [
 ### 5.2 项目（Project）新增可选 `repo`
 
 ```js
-{ name: 'pms-web', mr: 'https://git.joyintoy.cn/joyin/pms-web', localPath: 'C:\\项目\\pms-web', repo: '' }
+{ name: 'pms-web', mr: 'https://git.example.com/your-group/pms-web', localPath: 'C:\\项目\\pms-web', repo: '' }
 ```
 
 - `repo` 留空时**从 `mr` 推导**：去掉 `/-/merge_requests...` 段与末尾 `/`，补 `.git`；
@@ -325,7 +325,7 @@ reqToBranches['7029460314'] = [
   'pms-web': {
     branches: [{ branch, author, date, message, isRemote }],   // 原有本地通道
     names: [...],                                              // ls-remote 通道（仅名字）
-    repo: 'https://git.joyintoy.cn/joyin/pms-web.git',
+    repo: 'https://git.example.com/your-group/pms-web.git',
     source: 'ls-remote' | 'local',
     base: 'origin/master',
     index: { 'feat/xxx': { ids: [], commits, lastDate } },      // L1 反查结果
@@ -427,7 +427,7 @@ reqToBranches['7029460314'] = [
 |---|---|
 | 一个需求ID命中多个分支 | 全部列出，默认选 L1 命中且 `commits` 最小的（越专一越可能是主分支），其余折叠为「另有 N 个」 |
 | 一个分支服务多个需求（融合分支） | 各需求行各自引用，并在分支标签标注覆盖的其他需求 |
-| 分支名写1个ID、代码覆盖面更大 | **以 L1 并集为准**，UI 上提示「分支名未写出的需求：7048154426」 |
+| 分支名写1个ID、代码覆盖面更大 | **以 L1 并集为准**，UI 上提示「分支名未写出的需求：7000000006」 |
 | 需求ID无任何关联 | 只建需求行，分支留空，仍可用现有 📂 手动查 |
 | L2 命中但 L1 空 | 采用，并标注来源「分支名（推断）」，与 L1 视觉区分 |
 | 本地已手工改过标题/分支的同 ID 需求 | **默认不覆盖**，可开「仅更新标题/链接」 |
@@ -460,7 +460,7 @@ reqToBranches['7029460314'] = [
 | 层 | 方式 |
 |---|---|
 | 接口层 | 打 `/api/git/branches`、`/api/git/branch-index`、`/api/meegle/*`，断言结构与错误码（未登录、超时、坏 URL、无 `.git`、非 git 仓库） |
-| **算法层（重点）** | 用真实仓库做夹具：① 融合分支 `feat/ops四需求合并分支` → 恰好 4 个 ID；② `feat/7101366806…` → 含 `7048154426`（验证 first-parent 不漏 merge 前工作）；③ `feat/6929850538…` → L1 空、L2 命中；④ `fix/渠道下拉框数据错误` → fp 提交 0；⑤ 回归断言：**base=dev 时不得作为结果**（防算法倒退）；⑥ 数字边界不误命中 |
+| **算法层（重点）** | 用真实仓库做夹具：① 融合分支 `feat/ops四需求合并分支` → 恰好 4 个 ID；② `feat/7000000010…` → 含 `7000000006`（验证 first-parent 不漏 merge 前工作）；③ `feat/7000000001…` → L1 空、L2 命中；④ `fix/渠道下拉框数据错误` → fp 提交 0；⑤ 回归断言：**base=dev 时不得作为结果**（防算法倒退）；⑥ 数字边界不误命中 |
 | 逻辑层 | 去重合并、L1/L2/L3 并集去重、未登记判定与 triage 记忆、`deriveRepoUrl`、环境分支过滤 |
 | **UI 层（必须）** | **Playwright 驱动真实浏览器**打开 `http://localhost:1949`，覆盖：同步预览弹窗、勾选导入、多分支候选填入、影响面提示、**未登记分支卡片与三种处置**、Toast 文案、刷新后持久化 —— 不只交接口测试 |
 | 回归 | 现有 19 条需求主路径（新增/编辑/发版/导入导出/备注/右键菜单）不得回归 |
@@ -469,7 +469,7 @@ reqToBranches['7029460314'] = [
 
 - [ ] 项目**只配 `mr`、不配 `localPath`**，点「获取分支」能列出 GitLab 分支
 - [ ] `feat/ops四需求合并分支` 被识别为覆盖 4 个需求，4 条需求行都关联到它
-- [ ] `feat/6929850538中台重构二期` 通过 L2 被关联（L1 空），来源标注为「分支名」
+- [ ] `feat/7000000001中台重构二期` 通过 L2 被关联（L1 空），来源标注为「分支名」
 - [ ] `fix/渠道下拉框数据错误` 这类已合并分支**不产生**任何关联
 - [ ] `feat/mdm二期分支` 出现在未登记分支列表，跨 aps/scm/ops 三项目聚合为一张卡片
 - [ ] 未登记分支三种处置都能落库，刷新后不再重复提示
