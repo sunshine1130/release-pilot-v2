@@ -134,7 +134,7 @@
           {{indexConfig.onlyMine ? '仅我创建的分支' : '包含他人分支'}}<template v-if="indexNotMineTotal">，已过滤 {{indexNotMineTotal}} 条他人分支</template>
         </span>
         <span class="hint warn" v-if="indexDiagnostics.remoteFailed"
-              title="远端分支列表取不到（凭据或协议问题）。此时只按本地记录判断，远端已删除的旧分支会被算成未登记分支">
+              title="远端分支列表取不到（凭据或协议问题）。此时只按本地记录判断，远端已删除的旧分支会被算成未登记分支。引擎不会弹登录框，需要凭据时请在对应项目的克隆目录里执行一次 git fetch，让凭据进入凭据管理器后重试">
           ⚠ {{indexDiagnostics.remoteFailed}} 个项目的远端分支列表未取到，可能混入已删除的旧分支
         </span>
         <span class="hint warn" v-if="indexDiagnostics.skipped"
@@ -287,7 +287,7 @@
                         <div v-for="(p,pi) in item.projects" :key="pi" style="margin-bottom:3px;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;white-space:nowrap" @contextmenu.prevent="showCtxMenu($event,item,pi,'project')" :style="{cursor:(section.key==='pending'||section.key==='new')?'context-menu':'default'}">
                           <span class="project-tag" :class="{'has-mr':getProjectInfo(p.name)?.mr}" :data-color="getColorIdx(p.name)" :style="getProjectInfo(p.name)?.mr?{cursor:'pointer'}:{}" :title="getProjectInfo(p.name)?.mr?'点击跳转 MR':''" @click.stop="getProjectInfo(p.name)?.mr&&window.open(getProjectInfo(p.name).mr,'_blank')">{{p.name}}</span>
                           <span v-if="p.branch" class="branch-tag">
-                            <span class="branch-text" :title="(getProjectInfo(p.name)?.mr?'🔗 ':'')+p.branch" @click.stop="clickBranch(item,p,'project')">{{truncateBranch(p.branch)}}</span>
+                            <span class="branch-text" :title="(getProjectInfo(p.name)?.mr?'🔗 ':'')+p.branch+'（点击：复制分支名并打开 GitLab 的「新建 MR」页面——只预填来源与目标分支，需要你在 GitLab 点提交；本工具不会提交或合并任何代码）'" @click.stop="clickBranch(item,p,'project')">{{truncateBranch(p.branch)}}</span>
                             <button class="copy-btn" title="复制" @click.stop="copyText(p.branch)">📋</button>
                           </span>
                           <span v-if="impactIds(item,p).length" class="branch-impact" :title="'此分支还覆盖：'+impactIds(item,p).join(' / ')">还覆盖 {{impactIds(item,p).length}} 个需求</span>
@@ -305,7 +305,7 @@
                         <div v-for="(sb,sbi) in item.syncBranches" :key="sbi" style="margin-bottom:3px;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;white-space:nowrap" @contextmenu.prevent="showCtxMenu($event,item,sbi,'sync')" :style="{cursor:(section.key==='pending'||section.key==='new')?'context-menu':'default'}">
                           <span v-if="sb.project" class="project-tag" :class="{'has-mr':getProjectInfo(sb.project)?.mr}" :data-color="getColorIdx(sb.project)" :style="getProjectInfo(sb.project)?.mr?{cursor:'pointer'}:{}" :title="getProjectInfo(sb.project)?.mr?'点击跳转 MR':''" @click.stop="getProjectInfo(sb.project)?.mr&&window.open(getProjectInfo(sb.project).mr,'_blank')">{{sb.project}}</span>
                           <span v-if="sb.branch" class="branch-tag">
-                            <span class="branch-text" :title="(getProjectInfo(sb.project)?.mr?'🔗 ':'')+sb.branch" @click.stop="clickBranch(item,{name:sb.project,branch:sb.branch},'sync')">{{truncateBranch(sb.branch)}}</span>
+                            <span class="branch-text" :title="(getProjectInfo(sb.project)?.mr?'🔗 ':'')+sb.branch+'（点击：复制分支名并打开 GitLab 的「新建 MR」页面——只预填来源与目标分支，需要你在 GitLab 点提交；本工具不会提交或合并任何代码）'" @click.stop="clickBranch(item,{name:sb.project,branch:sb.branch},'sync')">{{truncateBranch(sb.branch)}}</span>
                             <button class="copy-btn" title="复制" @click.stop="copyText(sb.branch)">📋</button>
                           </span>
                           <span v-if="impactIds(item,sb).length" class="branch-impact" :title="'此分支还覆盖：'+impactIds(item,sb).join(' / ')">还覆盖 {{impactIds(item,sb).length}} 个需求</span>

@@ -82,19 +82,23 @@ function cacheSet(key, value) {
 /**
  * 执行 git 命令。
  *
- * 三个约束都是踩过的坑，不要简化：
+ * 四个约束都是踩过的坑，不要简化：
  *   - 必须走 execFile 数组参数（绝不拼字符串），否则仓库名/分支名里的特殊字符会变成参数注入
  *   - 必须设 GIT_TERMINAL_PROMPT=0：远端缺凭据时 git 会交互式等待输入，请求会永久挂起
+ *   - 必须同时关掉 Git Credential Manager 的交互（GCM_INTERACTIVE / credential.interactive）：
+ *     前一条只挡终端提问，挡不住 GCM 的登录窗口。少了它，缺凭据时一次「刷新分支索引」
+ *     会按项目数逐个弹 GitLab 登录框（同事实测被连番弹窗卡住）。引擎一律快速失败，
+ *     由页面上「远端分支列表未取到」的告警说明原因。
  *   - 必须带 timeout：网络异常时同样会挂住
  */
 async function runGit(args, cwd, timeoutMs = GIT_TIMEOUT_MS) {
   try {
-    const { stdout } = await execFileAsync('git', args, {
+    const { stdout } = await execFileAsync('git', ['-c', 'credential.interactive=false', ...args], {
       cwd,
       timeout: timeoutMs,
       maxBuffer: GIT_MAX_BUFFER,
       windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
     })
     return stdout
   } catch (err) {
@@ -495,7 +499,26 @@ function normalizeRepoUrl(repo) {
   return trimmed
 }
 
-async function listRemoteBranches(repo, match) {
+/**
+ * 取远端分支名。
+ *
+ * 优先用本地克隆自己的 origin，而不是按项目里的 MR 链接拼出来的地址：
+ * 克隆里配的 remote 正是这位同事平时 git fetch 用的那一套（很可能是 SSH，或与克隆地址绑定的
+ * https 凭据），凭据本来就在；而按 MR 链接拼出来的地址在凭据管理器里可能压根没有，
+ * git 就会去找 Git Credential Manager —— 一次刷新按项目数逐个弹登录框。
+ * 拼出来的地址保留为回退：没有本地克隆（或克隆里 remote 已失效）时照旧可用。
+ */
+async function listRemoteBranches(repo, match, localPath) {
+  if (localPath) {
+    try {
+      // '--' 之后的第一个参数是 <repository>，'origin' 会被当成远程名解析
+      const localArgs = ['ls-remote', '--heads', '--', 'origin']
+      if (match) localArgs.push(match)
+      return parseLsRemote(await runGit(localArgs, localPath))
+    } catch {
+      // 克隆里没有 origin、或它指向的地址已失效：退回按 MR 地址取
+    }
+  }
   const target = normalizeRepoUrl(repo)
   if (!target) throw { code: 'GIT_REPO_INVALID', message: 'repo 必须是 http(s):// 开头的仓库地址' }
   // '--' 之后的参数一律当位置参数，避免仓库地址被 git 当成选项
@@ -855,7 +878,8 @@ async function handleBranchIndex(req, res, query) {
     let remoteNames = null
     if (repo) {
       try {
-        remoteNames = new Set((await listRemoteBranches(repo)).filter(n => !isEnvBranch(n)))
+        // 第三个参数传本地克隆路径：远端分支列表优先走克隆自己的 origin，少一次凭据麻烦
+        remoteNames = new Set((await listRemoteBranches(repo, null, fullPath)).filter(n => !isEnvBranch(n)))
       } catch {
         // 远端不可达时降级为纯本地分析：提交分析本身不依赖网络，
         // 不该因为拉不到远端分支列表就让整个索引失败

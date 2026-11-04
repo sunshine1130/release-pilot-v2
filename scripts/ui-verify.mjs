@@ -14,6 +14,7 @@
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 
@@ -800,11 +801,24 @@ try {
   // ===== 13) 索引降级必须可见 =====
   // 远端分支列表取不到时不会报错，只退化成「本地 ref 全算数」——
   // 本地那些远端已删除的旧分支会全部变成未登记分支。这种静默降级必须显示出来。
+  // 注意：把 MR 地址写成不可达**已经不再**能制造这个场景了 —— 引擎会先用克隆自己的 origin
+  // （见 17），所以只有当克隆里也没有可用 origin 时才会真的取不到。这里就造这样一个仓库。
+  const noOriginRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-no-origin-'))
+  const shLocal = (cmd, cwd) => require('node:child_process').execSync(cmd, { cwd, stdio: 'pipe' }).toString()
+  const gLocal = 'git -c user.name=verify -c user.email=verify@example.invalid'
+  shLocal('git init -q', noOriginRepo)
+  shLocal('git symbolic-ref HEAD refs/heads/master', noOriginRepo)
+  fs.writeFileSync(path.join(noOriginRepo, 'a.txt'), 'x')
+  shLocal(`${gLocal} add -A`, noOriginRepo)
+  shLocal(`${gLocal} commit -q -m "chore: init"`, noOriginRepo)
+  // origin/master 必须存在，否则索引会以「没有发布主线」直接失败，而不是降级告警
+  shLocal('git update-ref refs/remotes/origin/master HEAD', noOriginRepo)
+
   await page.evaluate((proj) => {
     localStorage.setItem('todo_project_names', JSON.stringify([proj]))
     localStorage.setItem('todo_branch_index', '{}')
     localStorage.setItem('todo_index_config', JSON.stringify({ onlyMine: false }))
-  }, { name: P.main.name, mr: UNREACHABLE_MR, localPath: P.main.localPath })
+  }, { name: P.main.name, mr: UNREACHABLE_MR, localPath: noOriginRepo })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: '刷新分支索引' }).click()
@@ -814,6 +828,23 @@ try {
   // 面板默认收起，告警必须在收起态就看得见 —— 否则等于没提示
   check('告警在面板收起时也可见',
     (await page.locator('.unreg-panel .collapse-body.expanded').count()) === 0 && (await warn.isVisible()))
+
+  // 先把项目配置恢复成真实克隆再删临时仓库：后面还有用例会点「刷新分支索引」，
+  // 如果那时仍指着这个已删路径，请求会以 400 收场，被最后那条「无意外 HTTP 错误」当成回归。
+  // 内存里的 state 不会自动跟随 localStorage，所以必须重新加载页面。
+  await page.evaluate((proj) => {
+    const t = new Date()
+    const d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+    localStorage.setItem('todo_last_remind_date', d)
+    localStorage.setItem('todo_project_names', JSON.stringify([proj]))
+    localStorage.setItem('todo_branch_index', '{}')
+    localStorage.setItem('todo_index_config', JSON.stringify({ onlyMine: true }))
+  }, { name: P.mine.name, mr: P.mine.mr, localPath: P.mine.localPath })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(500)
+
+  // 不能用 fs.rmSync(recursive)：本机 Node 24 上会静默杀掉进程（见 MEMORY）
+  shLocal(`cmd /c rmdir /s /q "${noOriginRepo}"`)
 
   check('无 JS 未捕获异常', jsErrors.length === 0, jsErrors.slice(0, 3).join(' | '))
 
@@ -873,7 +904,7 @@ try {
       (await page.evaluate(() => window.__stayAlive)) === 1)
   }
 
-  // ===== 13) 飞书不可用时的引导 =====
+  // ===== 16) 飞书不可用时的引导 =====
   // 同事真实踩到过：未登录时页面教的命令在他那版 CLI 上报 unknown command "project"。
   // 造「未登录 / CLI 缺失」只能拦截接口，不能真去 logout —— 那会打断后面依赖真实登录的验证。
   // 顺带钉住「刷新分支索引不依赖飞书」：问过不能拉飞书时是否该禁用它，答案是不该。
@@ -937,6 +968,43 @@ try {
   check('恢复真实接口后显示已登录', realStatusText.includes('已登录'), realStatusText.slice(0, 80))
   await page.locator('.sync-box:not(.sync-box-wide) .sync-header .btn-close').click()
   await page.waitForTimeout(200)
+
+  // ===== 17) 远端分支列表优先用本地克隆自己的 origin =====
+  // 同事的痛点：刷新分支索引时被反复弹 GitLab 登录框。原因是引擎按「MR 链接」拼出 https 地址去
+  // ls-remote，而那个地址在他的凭据管理器里没有凭据 —— 克隆自己的 origin（往往是 SSH）才有。
+  // 这里造一个本地「远端」：bare 仓库 + 克隆，再故意传一个不可达的 https repo 参数；
+  // 只要索引仍拿到了远端分支列表，就证明它走的是克隆的 origin 而不是那个地址。
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-origin-'))
+  const sh = (cmd, cwd) => require('node:child_process').execSync(cmd, { cwd, stdio: 'pipe' }).toString()
+  try {
+    const bare = path.join(tmpRoot, 'bare.git')
+    const clone = path.join(tmpRoot, 'clone')
+    // 临时仓库里没有全局身份可用，显式带上，免得依赖本机 git 配置
+    const g = 'git -c user.name=verify -c user.email=verify@example.invalid'
+    sh(`git init --bare -q "${bare}"`)
+    sh(`git clone -q "${bare}" "${clone}"`)
+    fs.writeFileSync(path.join(clone, 'a.txt'), 'x')
+    sh(`${g} add -A`, clone)
+    sh(`${g} commit -q -m "chore: init"`, clone)
+    const baseBranch = sh('git symbolic-ref --short HEAD', clone).trim()
+    sh(`git push -q origin ${baseBranch}`, clone)
+    sh('git fetch -q origin', clone)
+    // 幽灵分支：本地有、远端没有。只有真正拿到远端列表时它才会被过滤掉（localOnly 会 +1）
+    sh('git branch feat/ghost-local-only', clone)
+
+    const idx = JSON.parse((await rawGet(
+      `/api/git/branch-index?path=${encodeURIComponent(clone)}`
+      + `&repo=${encodeURIComponent('https://example.invalid/nope.git')}`
+      + `&base=${encodeURIComponent(baseBranch)}&onlyMine=0`,
+    )).body)
+    check('远端分支列表优先走克隆自己的 origin，不用 MR 链接拼的地址',
+      idx.remoteFiltered === true, `remoteFiltered=${idx.remoteFiltered}，传入 repo=${idx.repo}`)
+    check('远端列表确实生效（本地幽灵分支被过滤掉）',
+      Number(idx.localOnly) >= 1, `localOnly=${idx.localOnly}`)
+  } finally {
+    // 不能用 fs.rmSync(recursive)：本机 Node 24 上会静默杀掉进程（见 MEMORY）
+    sh(`cmd /c rmdir /s /q "${tmpRoot}"`)
+  }
 
   // toDo.json 不存在时的 404 是 v1 既有正常分支（loadFromJsonFile 会静默回退 localStorage）；
   // favicon 缺失与功能无关。除这两者外出现 4xx/5xx 都算回归。

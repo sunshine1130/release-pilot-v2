@@ -369,6 +369,10 @@ kbd {
   <p class="note" style="margin-top:8px"><strong>如果同步预览里每条都显示「未匹配到分支」</strong>，先看窗口顶部的提示：
   它通常不是"这条需求真的没有分支"，而是<strong>索引还没生成</strong>或<strong>项目没配全</strong>（缺 MR 地址或本地路径）。
   提示会明确写出是哪种情况，以及要补什么。此时每行会显示 <code>—</code> 而不是「未匹配到分支」，以免被误读成单条需求的事实。</p>
+  <p class="note" style="margin-top:8px"><strong>不会弹 GitLab 登录框</strong>：取远端分支名时优先用<strong>本地克隆自己的 origin</strong>，
+  也就是你平时 <code>git fetch</code> 用的那套凭据（SSH 或已保存的 https），不会拿项目里填的 MR 链接去重新认证。
+  万一某个项目取不到远端列表，顶部会提示「N 个项目的远端分支列表未取到」——此时在该项目的克隆目录里执行一次
+  <code>git fetch</code> 让凭据进凭据管理器，再刷新即可（引擎本身永远不弹认证窗口，会直接放弃并告警）。</p>
 </div>
 
 <div class="card">
@@ -457,6 +461,10 @@ kbd {
     <tr><td><span class="tag tag-releasing">发版中</span></td><td>全局上线分支 &gt; 项目目标分支 &gt; null</td></tr>
     <tr><td><span class="tag tag-released">已发版</span></td><td>全局上线分支 &gt; 项目目标分支 &gt; null</td></tr>
   </table>
+  <p class="note" style="margin-top:10px"><strong>它不会替你提交或合并</strong>：这里打开的只是 GitLab 的「新建 MR」页面，
+  来源分支与目标分支已经预填好，但必须<strong>你自己在 GitLab 那边点「Create merge request」</strong>才会产生 MR，
+  再点「Merge」才会合并；目标分支也<strong>不会是 <code>master</code></strong>（按上表取 <code>test</code> / <code>uat</code> / 上线分支）。
+  本工具对 GitLab 只做 <code>git ls-remote</code> 这类只读操作，不会 push、不会合并、不会改你的工作区。</p>
 </div>
 
 <!-- ===== 项目管理 ===== -->
