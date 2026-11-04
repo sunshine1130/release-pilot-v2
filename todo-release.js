@@ -991,8 +991,8 @@ createApp({
     // （实测 ly_oms 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 张），
     // 所以类型是多选，只查一张会静默漏掉其他域的全部需求。
 
-    // {statusFilter} 由 buildStatusFilter 生成；旧配置里的模板没有这个占位符，
-    // 会在加载时自动升级（见 onMounted），否则老用户升级后过滤会静默失效
+    // {statusFilter} 由服务端按「该类型实际存在的状态」生成（见 server.js meegleQueryAll）。
+    // 旧配置里存的模板没有这个占位符，会在 onMounted 自动升级 —— 否则老配置升级后过滤会静默失效。
     const DEFAULT_MQL = 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`{statusFilter}'
     const LEGACY_MQL = 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`'
 
