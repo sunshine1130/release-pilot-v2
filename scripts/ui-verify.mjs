@@ -446,11 +446,29 @@ try {
   const firstNewId = ((await previewBox.locator('.sync-row:not(.existing) .sync-id').first().textContent()) || '').trim()
   await previewBox.getByRole('button', { name: '全选新增' }).click()
   await page.waitForTimeout(200)
+  const selectedN = Number(((await previewBox.locator('.sync-toolbar .sync-hint').textContent()) || '').match(/已选 (\d+)/)?.[1] || 0)
+  const importLabel = ((await previewBox.locator('.sync-footer .btn-purple').textContent()) || '').trim()
+  check('全选新增后按钮承诺的条数=已选条数',
+    selectedN > 1 && importLabel.includes(String(selectedN)), `${importLabel} / 已选 ${selectedN}`)
+
+  // 勾完再筛选：被筛掉的是**显示**，不该影响已经勾了什么。
+  // 旧实现从过滤后的行里取选中项，会出现「按钮说导 N 条、实际只导 1 条」且无任何提示。
+  await previewBox.locator('.sync-input').fill(firstNewId)
+  await page.waitForTimeout(400)
+  const visibleRows = await previewBox.locator('.sync-row').count()
+  check('筛选后提示有多少已选行被隐藏',
+    visibleRows < selectedN && (await previewBox.locator('.sync-hidden-note').count()) > 0,
+    `可见 ${visibleRows} 行 / 已选 ${selectedN}`)
+
   await previewBox.locator('.sync-footer .btn-purple').click()
   await page.waitForTimeout(800)
 
+  const numBefore = Number((totalBefore.match(/\d+/) || [0])[0])
   const totalAfter = (await page.locator('h1 .sub').textContent()) || ''
-  check('导入后需求总数增加', totalBefore !== totalAfter, `${totalBefore.trim()} → ${totalAfter.trim()}`)
+  const numAfter = Number((totalAfter.match(/\d+/) || [0])[0])
+  check('导入后需求总数增加', totalAfter !== totalBefore, `${totalBefore.trim()} → ${totalAfter.trim()}`)
+  check('导入条数按选中集合而不是按筛选结果',
+    numAfter - numBefore === selectedN, `新增 ${numAfter - numBefore}，已选 ${selectedN}`)
 
   // 再拉一次验证去重：需要看见已导入的那些，所以显式关闭「只看未导入」筛选
   await page.getByRole('button', { name: '同步飞书项目' }).click()
@@ -564,6 +582,33 @@ try {
   // 用整页文本判断会被 toast 自己命中，看起来像没删掉
   check('v1 删除后行消失', (await page.locator('tr', { hasText: '回归-编辑后' }).count()) === 0)
 
+  // ===== 11b) 发版主路径：未设上线分支时要先填目标分支 =====
+  // 之前的用例预置了 todo_launch_branch，恰好绕过了这条分支，「填写目标分支」的
+  // 必填校验一直没被测到 —— 而它正是防止目标分支漏填的那道闸
+  await page.evaluate(() => localStorage.removeItem('todo_launch_branch'))
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(600)
+  const launchRow = page.locator('tr', { hasText: 'UI验证-待挂分支' })
+  await launchRow.getByRole('button', { name: '发版' }).click()
+  await page.waitForTimeout(400)
+  const launchDialog = page.locator('.dialog-overlay', { has: page.locator('.confirm-title', { hasText: '请填写各项目的上线目标分支' }) })
+  check('未设上线分支时先要求填目标分支', await launchDialog.isVisible())
+  await launchDialog.getByRole('button', { name: '确认发版' }).click()
+  await page.waitForTimeout(300)
+  check('目标分支为空时拦住发版', await launchDialog.isVisible())
+  check('拦住时有明确提示',
+    (await page.locator('.toast.show', { hasText: '请填写所有项目的目标分支' }).count()) > 0)
+  await launchDialog.locator('input[placeholder="目标分支"]').first().fill('master_launched')
+  await launchDialog.getByRole('button', { name: '确认发版' }).click()
+  await page.waitForTimeout(500)
+  check('填写后进入发版中',
+    ((await launchRow.locator('.status-tag').textContent()) || '').includes('发版中'))
+  await launchRow.getByRole('button', { name: '标记已发版' }).click()
+  await page.waitForTimeout(400)
+  check('标记已发版',
+    ((await launchRow.locator('.status-tag').textContent()) || '').includes('已发版'),
+    (await launchRow.locator('.status-tag').textContent()) || '')
+
   const searchInput = page.getByPlaceholder('搜索需求名称、链接ID或分支名...')
   await searchInput.fill('UI验证-销售预测')
   await page.waitForTimeout(400)
@@ -669,6 +714,26 @@ try {
     `${await page.locator('.unreg-card').count()} 张卡片`)
   check('界面标注已切换为包含他人分支',
     (await page.locator('.unreg-panel .hint', { hasText: '包含他人分支' }).count()) > 0)
+
+  // ===== 13) 索引降级必须可见 =====
+  // 远端分支列表取不到时不会报错，只退化成「本地 ref 全算数」——
+  // 本地那些远端已删除的旧分支会全部变成未登记分支。这种静默降级必须显示出来。
+  await page.evaluate(() => {
+    localStorage.setItem('todo_project_names', JSON.stringify([
+      { name: 'ops-web', mr: 'https://git.joyintoy.invalid/joyin/ops-web', localPath: 'C:\\项目\\ops-web' },
+    ]))
+    localStorage.setItem('todo_branch_index', '{}')
+    localStorage.setItem('todo_index_config', JSON.stringify({ onlyMine: false }))
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: '刷新分支索引' }).click()
+  const warn = page.locator('.unreg-panel .hint.warn', { hasText: '远端分支列表未取到' })
+  await warn.waitFor({ timeout: 240000 })
+  check('远端列表取不到时界面明确告警', await warn.isVisible(), ((await warn.textContent()) || '').trim())
+  // 面板默认收起，告警必须在收起态就看得见 —— 否则等于没提示
+  check('告警在面板收起时也可见',
+    (await page.locator('.unreg-panel .collapse-body.expanded').count()) === 0 && (await warn.isVisible()))
 
   check('无 JS 未捕获异常', jsErrors.length === 0, jsErrors.slice(0, 3).join(' | '))
 

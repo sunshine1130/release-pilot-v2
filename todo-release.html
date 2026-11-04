@@ -123,6 +123,14 @@
         <span class="hint" v-if="Object.keys(branchIndex).length">
           {{indexConfig.onlyMine ? '仅我创建的分支' : '包含他人分支'}}<template v-if="indexNotMineTotal">，已过滤 {{indexNotMineTotal}} 条他人分支</template>
         </span>
+        <span class="hint warn" v-if="indexDiagnostics.remoteFailed"
+              title="远端分支列表取不到（凭据或协议问题）。此时只按本地记录判断，远端已删除的旧分支会被算成未登记分支">
+          ⚠ {{indexDiagnostics.remoteFailed}} 个项目的远端分支列表未取到，可能混入已删除的旧分支
+        </span>
+        <span class="hint warn" v-if="indexDiagnostics.skipped"
+              title="独占提交数超过上限的分支会被跳过，不参与需求反查">
+          ⚠ 有 {{indexDiagnostics.skipped}} 条超长分支未分析
+        </span>
       </div>
       <div class="collapse-body" :class="{expanded:unregExpanded}">
         <div v-if="!Object.keys(branchIndex).length" class="unreg-hint">
@@ -520,7 +528,7 @@
           <input v-model="syncDialog.keyword" class="sync-input" style="width:220px" placeholder="按名称或需求ID筛选...">
           <label class="sync-type-item"><input type="checkbox" v-model="syncDialog.onlyUnregistered"> 只看未导入</label>
           <span style="flex:1"></span>
-          <span class="sync-hint">共 {{syncRows.length}} 条，已选 {{syncSelectedCount}}</span>
+          <span class="sync-hint">共 {{syncRows.length}} 条，已选 {{syncSelectedCount}}<template v-if="syncHiddenSelectedCount"><span class="sync-hidden-note">（其中 {{syncHiddenSelectedCount}} 条被当前筛选隐藏，导入时仍会一起导入）</span></template></span>
           <button class="btn btn-outline btn-xs" @click="selectAllNew">全选新增</button>
         </div>
         <div class="sync-list">

@@ -53,6 +53,8 @@ function fail(res, code, message, status = 400) {
 // ===== 进程内缓存 =====
 
 const cacheStore = new Map()
+/** 进程内缓存条目上限：键含 path/repo 等外部输入，不设上限会一直涨 */
+const CACHE_MAX_ENTRIES = 200
 
 function cacheGet(key, ttlMs) {
   const hit = cacheStore.get(key)
@@ -65,6 +67,13 @@ function cacheGet(key, ttlMs) {
 }
 
 function cacheSet(key, value) {
+  // 键里带 path/repo/match 等外部传入的值，长期运行会只增不减；超上限按插入顺序清最旧的
+  if (cacheStore.size >= CACHE_MAX_ENTRIES && !cacheStore.has(key)) {
+    for (const k of cacheStore.keys()) {
+      cacheStore.delete(k)
+      if (cacheStore.size < CACHE_MAX_ENTRIES) break
+    }
+  }
   cacheStore.set(key, { value, at: Date.now() })
 }
 
@@ -89,17 +98,17 @@ async function runGit(args, cwd, timeoutMs = GIT_TIMEOUT_MS) {
     })
     return stdout
   } catch (err) {
-    throw normalizeGitError(err)
+    throw normalizeGitError(err, timeoutMs)
   }
 }
 
-function normalizeGitError(err) {
+function normalizeGitError(err, timeoutMs = GIT_TIMEOUT_MS) {
   const stderr = String(err.stderr || '')
   if (err.code === 'ENOENT') {
     return { code: 'GIT_NOT_FOUND', message: '未检测到 git，请先安装 Git for Windows' }
   }
   if (err.killed || err.signal === 'SIGTERM') {
-    return { code: 'GIT_TIMEOUT', message: `git 调用超时（${GIT_TIMEOUT_MS}ms）` }
+    return { code: 'GIT_TIMEOUT', message: `git 调用超时（${timeoutMs}ms）` }
   }
   if (/could not read Username|Authentication failed|terminal prompts disabled/i.test(stderr)) {
     return { code: 'GIT_AUTH_REQUIRED', message: '该仓库需要凭据，且当前进程不允许交互式输入' }
@@ -128,19 +137,24 @@ function resolveMeegleEntry() {
   return null
 }
 
-/** 执行 meegle CLI；拿不到入口脚本时退回 .cmd（能用但有 shell 转义风险，仅作兜底） */
+/** 执行 meegle CLI。拿不到入口脚本就直接报错，绝不退回 .cmd + shell —— 见下方注释 */
 async function runMeegle(args, timeoutMs = 90000) {
   const entry = resolveMeegleEntry()
-  const [bin, argv] = entry
-    ? [process.execPath, [entry, ...args]]
-    : [process.platform === 'win32' ? 'meegle.cmd' : 'meegle', args]
+  // 拿不到入口脚本时**不退回** meegle.cmd + shell:true：shell 模式下 Node 不转义参数，
+  // 而 MQL/项目KEY 都来自请求体，一个 `&`、`|` 或 `%VAR%` 就能拼出任意命令。
+  // 装了别的包管理器（nvm/volta/pnpm）导致路径不在候选里时，明确报错让用户设 MEEGLE_JS。
+  if (!entry) {
+    throw {
+      code: 'MEEGLE_CLI_MISSING',
+      message: '未找到 meegle CLI 入口脚本，请安装 @lark-project/meegle，或用环境变量 MEEGLE_JS 指向 bin/meegle.js',
+    }
+  }
 
   try {
-    const { stdout } = await execFileAsync(bin, argv, {
+    const { stdout } = await execFileAsync(process.execPath, [entry, ...args], {
       timeout: timeoutMs,
       maxBuffer: GIT_MAX_BUFFER,
       windowsHide: true,
-      shell: !entry && process.platform === 'win32',
     })
     return stdout
   } catch (err) {
@@ -382,7 +396,7 @@ async function handleMeegleQuery(req, res) {
   const { projectKey, simpleName, types, mqlTemplate, excludeStatuses, maxPerType } = body || {}
   if (!projectKey) return fail(res, 'BAD_REQUEST', '缺少 projectKey')
   if (!Array.isArray(types) || !types.length) return fail(res, 'BAD_REQUEST', '至少选择一种工作项类型')
-  if (!mqlTemplate || !/\{type\}/.test(mqlTemplate)) {
+  if (!mqlTemplate || !/\{type\}/.test(mqlTemplate) || !/\{space\}/.test(mqlTemplate)) {
     return fail(res, 'BAD_REQUEST', 'MQL 模板必须包含 {space} 与 {type} 占位符')
   }
   try {
@@ -487,7 +501,25 @@ async function listRemoteBranches(repo, match) {
   // '--' 之后的参数一律当位置参数，避免仓库地址被 git 当成选项
   const args = ['ls-remote', '--heads', '--', target]
   if (match) args.push(match)
-  const out = await runGit(args, BASE_DIR)
+  try {
+    return parseLsRemote(await runGit(args, BASE_DIR))
+  } catch (err) {
+    // 项目里的 MR 地址可能是 http://（手工填过），而这类内网 GitLab 常常只认 https 的凭据；
+    // 直接失败会让「远端分支列表」静默为空，本地已删除的旧分支就全成了未登记分支。
+    // 换协议再试一次，成本只有一次 ls-remote。
+    const alt = target.replace(/^http:\/\//i, 'https://')
+    if (alt === target) throw err
+    try {
+      const altArgs = ['ls-remote', '--heads', '--', alt]
+      if (match) altArgs.push(match)
+      return parseLsRemote(await runGit(altArgs, BASE_DIR))
+    } catch {
+      throw err
+    }
+  }
+}
+
+function parseLsRemote(out) {
   return out
     .split('\n')
     .map(line => line.split('\t')[1])
@@ -682,7 +714,13 @@ async function computeBranchIndex(cwd, base, maxCommits, maxBranches, remoteName
 /** 近 1 个月（v1 函数名叫 getThreeMonthsAgo 但实际减 1 个月，这里保留原行为不改） */
 function oneMonthAgoStr() {
   const date = new Date()
+  const day = date.getDate()
+  // 必须先归到 1 号再减月：直接 setMonth(-1) 在 31 号会让 3/31 变成 2/31，
+  // JS 会顺延到 3/3，于是「近一个月」窗口被悄悄缩成 28 天
+  date.setDate(1)
   date.setMonth(date.getMonth() - 1)
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+  date.setDate(Math.min(day, lastDay))
   return date.toISOString().split('T')[0]
 }
 
@@ -738,7 +776,9 @@ async function handleLocalBranches(req, res, query) {
     if (seen.has(refName)) continue
     seen.add(refName)
 
-    branches.push({ branch: refName, author, date, message, isRemote: refName.includes('/') })
+    // isRemote 已删除：这个接口列的就是本地分支（origin/* 已被过滤），
+    // 原来用「分支名含斜杠」判断远端，会把 feat/xxx 这类本地分支全标成远端，且前端从未使用
+    branches.push({ branch: refName, author, date, message })
     void hash
   }
 

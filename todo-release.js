@@ -372,6 +372,9 @@ createApp({
       state.projectNames.splice(i, 1)
       if (state.editProjectIdx === i) state.editProjectIdx = -1
       else if (state.editProjectIdx > i) state.editProjectIdx--
+      // 项目删了，它的分支索引不能留着：否则已删项目的分支还会继续参与
+      // 需求匹配与「未登记分支」聚合，界面上会冒出已经不存在的项目
+      if (state.branchIndex[name]) { delete state.branchIndex[name]; saveBranchIndex() }
       saveToLocalStorage(); toast('已移除 ' + name)
     }
 
@@ -975,6 +978,25 @@ createApp({
       Object.values(state.branchIndex).reduce((n, e) => n + (e.notMine || 0), 0))
 
     /**
+     * 索引诊断：这几种情况会让「未登记分支」和匹配结果失真，必须显示出来。
+     *
+     * 尤其是 remoteFailed：远端分支列表没取到时（凭据/协议问题）不会报错，
+     * 只是退化成「本地 ref 全算数」，本地那些远端已删除的旧分支会全部变成
+     * 「未登记分支」—— 静默降级比报错危险得多。
+     */
+    const indexDiagnostics = computed(() => {
+      let remoteFailed = 0
+      let skipped = 0
+      let remoteOnly = 0
+      for (const e of Object.values(state.branchIndex)) {
+        if (e.remoteFiltered === false) remoteFailed++
+        for (const b of Object.values(e.branches || {})) if (b.skipped) skipped++
+        remoteOnly += (e.remoteOnly || []).length
+      }
+      return { remoteFailed, skipped, remoteOnly }
+    })
+
+    /**
      * 未登记分支：有独占提交、但反查不到任何需求ID。
      * 发版时最容易漏掉的就是这些 —— 需求还没出、或者一堆优化都做在一个分支里。
      */
@@ -1082,8 +1104,22 @@ createApp({
       return out
     }
 
+    /**
+     * 已有需求的 workItemId 集合。
+     * 预览列表每行都要判「是否已导入」，逐行对全部需求跑一遍 selfWorkItemId（内含正则）
+     * 是 O(行数 × 需求数)：几百行 × 几百条，每敲一个筛选字符都白跑十万次正则。
+     */
+    const existingWorkItemIds = computed(() => {
+      const set = new Set()
+      for (const it of state.items) {
+        const id = selfWorkItemId(it)
+        if (id) set.add(id)
+      }
+      return set
+    })
+
     function isExistingRequirement(workItemId) {
-      return state.items.some(it => selfWorkItemId(it) === workItemId)
+      return existingWorkItemIds.value.has(workItemId)
     }
 
     /**
@@ -1324,6 +1360,15 @@ createApp({
     const syncSelectedCount = computed(() => Object.values(state.syncSelection).filter(Boolean).length)
 
     /**
+     * 已勾选但被当前筛选隐藏的行数。
+     * 导入按选中集合走，所以这些行照样会被导入；不写出来用户会以为筛选=取消勾选。
+     */
+    const syncHiddenSelectedCount = computed(() => {
+      const visible = new Set(syncRows.value.map(r => r.workItemId))
+      return Object.keys(state.syncSelection).filter(id => state.syncSelection[id] && !visible.has(id)).length
+    })
+
+    /**
      * 「为什么没匹配到分支」的说明。
      *
      * 逐行显示「未匹配到分支」会把一个全局前置条件问题伪装成单条需求的事实 ——
@@ -1432,7 +1477,16 @@ createApp({
 
     /** 导入选中项：只建新需求，已存在的默认不动（保护本地已人工调整过的数据） */
     function applySync() {
-      const picked = syncRows.value.filter(r => state.syncSelection[r.workItemId] && r.isNew)
+      // 按**选中集合**取，而不是按 syncRows 取：syncRows 被关键词与「只看未导入」过滤过，
+      // 勾选后再输入筛选词会让「按钮写着导入选中 12 条、实际只导 3 条」，且毫无提示。
+      // 过滤只该影响看得见什么，不该影响已经勾了什么。
+      const byId = new Map(state.syncRaw.map(r => [r.workItemId, r]))
+      const picked = Object.keys(state.syncSelection)
+        .filter(id => state.syncSelection[id])
+        .map(id => byId.get(id))
+        .filter(r => r && !isExistingRequirement(r.workItemId))
+        // syncRaw 里只有原始字段，行级算出来的 matches 得在这里补上（旧实现是直接取预览行）
+        .map(r => ({ ...r, matches: pickPrimaryMatches(matchesOf(r.workItemId)) }))
       if (!picked.length) { toast('请先勾选要导入的新需求'); return }
 
       let n = 0
@@ -1586,6 +1640,7 @@ createApp({
       indexProgress: computed(() => state.indexProgress),
       unregExpanded: computed({ get: () => state.unregExpanded, set: v => { state.unregExpanded = v } }),
       unregKeyword: computed({ get: () => state.unregKeyword, set: v => { state.unregKeyword = v } }),
+      indexDiagnostics,
       indexConfig: computed(() => state.indexConfig),
       indexNotMineTotal,
       // v2 飞书同步别名
@@ -1601,6 +1656,7 @@ createApp({
       toggleGroupCollapse,
       syncIndexHint,
       syncSelectedCount,
+      syncHiddenSelectedCount,
       syncCollapsed: computed(() => state.syncCollapsed),
     }
   }

@@ -1507,6 +1507,9 @@ input[data-role="syncProjectName"] {
 
 /* ===== v2: 未登记分支 / 影响面提示 ===== */
 .unreg-panel .pm-header { cursor: pointer; }
+/* 索引降级（远端列表取不到、超长分支被跳过）会让未登记列表失真，配色上要跳出普通提示 */
+.unreg-panel .pm-header .hint.warn { color: var(--warning); }
+.sync-hidden-note { color: var(--text-secondary); }
 .unreg-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 0 4px; }
 .unreg-toolbar .search-wrap { margin: 0; }
 .unreg-hint { font-size: 12px; color: var(--text-muted); padding: 8px 0; line-height: 1.8; }
