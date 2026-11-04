@@ -1416,6 +1416,16 @@ input[data-role="syncProjectName"] {
   border: 1px solid currentColor; border-radius: var(--radius-sm); padding: 2px 8px;
   margin-left: auto;
 }
+/* 版本徽标：既是「我现在跑的是哪版」，也是「点一下拉最新代码」的入口 */
+.version-badge {
+  font-family: var(--mono); font-size: 11px; padding: 2px 8px;
+  color: var(--text-secondary); background: var(--surface-raised);
+  border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+  cursor: pointer; margin-left: 8px;
+}
+.version-badge:hover { color: var(--accent); border-color: var(--accent); }
+.version-badge.busy, .version-badge:disabled { opacity: .6; cursor: progress; }
+
 /* ===== Empty state ===== */
 .empty-state {
   text-align: center;

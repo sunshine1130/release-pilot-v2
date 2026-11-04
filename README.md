@@ -7,6 +7,8 @@
 ## 快速开始
 
 ```bash
+git clone https://github.com/sunshine1130/release-pilot-v2.git   # 私有仓库，需要先被加为协作者
+cd release-pilot-v2
 node server.js          # 或双击 start-server.bat
 ```
 
@@ -17,6 +19,29 @@ node server.js          # 或双击 start-server.bat
 ```bash
 meegle auth login --host project.feishu.cn
 ```
+
+## 更新到最新版本
+
+页头右上角有个**版本号徽标**（如 `v3f9a1c2`）：**点一下就检查并拉取最新代码**，拉到新版本时页面会自动刷新，
+所以不需要你自己 `git pull`。
+
+两种情况需要额外处理：
+
+| 情况 | 现象 | 怎么办 |
+|---|---|---|
+| 这次更新改了 `server.js` | 提示「改动包含引擎代码」 | 关掉服务窗口、重跑 `start-server.bat`，再刷新页面（引擎在进程里，刷新页面不会重新加载它） |
+| 还没登录过 GitHub（私有仓库） | 提示「拉取需要 GitHub 登录」 | 在项目目录里手工执行一次 `git pull`，按提示在浏览器里完成登录；之后点徽标就能直接更新 |
+
+也可以直接双击 `更新.bat`（等价于 `git pull --ff-only`），引擎没起来时用它。
+
+## 分享给同事
+
+1. **加协作者**：GitHub 仓库 → Settings → Collaborators → 添加同事的账号（私有仓库必须加，否则他们拉不到）。
+2. 同事克隆并启动（同上「快速开始」）。
+3. 各自配置自己的环境，**这些不随仓库分享**：
+   - 「项目管理」里每个项目的 **MR 地址 + 本地克隆路径**（本地路径因机器而异）；
+   - 飞书项目 CLI 登录（`meegle auth login`）；
+   - 需求数据本身（存在各自浏览器的 localStorage 里，可用「导出 / 导入」或项目里的 `backup/` 互相传）。
 
 ## v2 相对 v1 解决了什么
 
@@ -37,6 +62,7 @@ start-server.bat                 启动入口
 使用说明.html                     面向使用者的文档
 docs/                            技术方案与接口/算法/数据模型/实现设计文档
 scripts/ui-verify.mjs            Playwright 真实浏览器验证脚本
+更新.bat                          一键 git pull（引擎没起来时用；页面里点版本号也行）
 backup/                          「备份」按钮写出的数据备份（.gitignore 已排除，不提交）
 ```
 
@@ -57,7 +83,7 @@ node server.js                       # 另开一个终端
 node scripts/ui-verify.mjs           # 真实浏览器跑 99 项断言（含引擎级安全回归与备份落盘往返）
 ```
 
-覆盖：页面渲染、端口跟随、分支索引、未登记分支处置与持久化、影响面提示、飞书同步（真实调用 CLI）、按需求ID去重、导出/导入往返、以及 v1 主路径回归。
+覆盖：页面渲染、端口跟随、分支索引、未登记分支处置与持久化、影响面提示、飞书同步（真实调用 CLI）、按需求ID去重、导出/导入往返、备份落盘与恢复往返、版本徽标与更新检查、引擎级安全回归（非法转义/目录穿越/跨域），以及 v1 主路径回归。
 
 > 脚本从本机既有自动化工程的 `node_modules` 里取 Playwright，不需要往本项目装依赖。
 

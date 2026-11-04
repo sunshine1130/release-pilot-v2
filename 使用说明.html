@@ -158,8 +158,10 @@ kbd {
     <tr><td><code>todo-release.js</code></td><td>业务逻辑（Vue 3 组件）</td></tr>
     <tr><td><code>todo-release.css</code></td><td>样式文件</td></tr>
     <tr><td><code>vue.global.js</code></td><td>Vue 3 运行库</td></tr>
-    <tr><td><code>server.js</code></td><td>本地服务：静态页面 + 分支/飞书项目接口</td></tr>
+    <tr><td><code>server.js</code></td><td>本地服务：静态页面 + 分支/飞书项目/备份/更新接口</td></tr>
     <tr><td><code>toDo.json</code></td><td>数据文件（可选，优先级高于 localStorage）</td></tr>
+    <tr><td><code>更新.bat</code></td><td>一键 <code>git pull</code> 拉最新代码（引擎没起来时用）</td></tr>
+    <tr><td><code>backup/</code></td><td>「备份」按钮写出的数据备份（自动创建）</td></tr>
     <tr><td><code>docs/</code></td><td>技术方案与接口/算法/数据模型文档</td></tr>
     <tr><td><code>scripts/ui-verify.mjs</code></td><td>浏览器端自动化验证脚本（可选）</td></tr>
   </table>
@@ -167,11 +169,25 @@ kbd {
 </div>
 
 <div class="card">
+  <h3>更新到最新版本</h3>
+  <p>页头右上角的<strong>版本号徽标</strong>（如 <code>v3f9a1c2</code>）既是当前版本，也是更新入口：
+  <strong>点一下就检查并拉取最新代码</strong>，拉到新版会自动刷新页面，不用自己去 <code>git pull</code>。</p>
+  <ul>
+    <li>提示「改动包含引擎代码」时：关掉服务窗口、重跑 <code>start-server.bat</code>，再刷新页面
+      —— 引擎已经加载在进程里，光刷新页面不会重新加载它。</li>
+    <li>提示「拉取需要 GitHub 登录」时：在项目目录里手工执行一次 <code>git pull</code> 完成浏览器登录
+      （私有仓库必须登录），之后点徽标就能直接更新。</li>
+    <li>也可以直接双击 <code>更新.bat</code>。</li>
+  </ul>
+</div>
+
+<div class="card">
   <h3>数据存储优先级</h3>
   <ol>
     <li>同目录下的 <code>toDo.json</code>（如果存在，每次打开自动加载）</li>
-    <li>浏览器 <code>localStorage</code>（自动保存，关闭浏览器不丢失）</li>
-    <li>手动 <strong>导出/导入</strong> JSON 文件（推荐定期备份）</li>
+    <li>浏览器 <code>localStorage</code>（自动保存，关闭浏览器不丢失；<strong>按协议+主机+端口隔离</strong>，换端口就是另一份数据）</li>
+    <li>项目 <code>backup/</code> 目录（点「备份」写入，清浏览器缓存也不会丢，推荐定期点）</li>
+    <li>手动 <strong>导出/导入</strong> JSON 文件（适合发给别人或存到别处）</li>
   </ol>
   <p style="margin-top:10px">v2 新增的本地键：<code>todo_branch_index</code>（分支索引，可重算，<strong>不导出</strong>）、
   <code>todo_branch_triage</code>（未登记分支的处置）、<code>todo_branch_links</code>（手工关联）、

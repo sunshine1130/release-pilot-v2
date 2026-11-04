@@ -881,6 +881,145 @@ async function handleBranchIndex(req, res, query) {
   }
 }
 
+// ===== 自更新：同事点一下就能拉到最新代码 =====
+//
+// 页面就是这个目录里的静态文件，所以「在项目目录里 git pull」就等于更新应用，
+// 不必像谷歌插件那样另外做一套分发。两个前提必须讲清楚并体现在错误信息里：
+//   1. 私有仓库第一次拉取要登录 GitHub；引擎不做交互式提示（会挂死），
+//      所以首次要在项目目录里手工 pull 一次完成登录，之后引擎就能直接拉。
+//   2. 引擎自己（server.js）在进程里已加载过：这次更新若动了引擎代码，
+//      光刷新页面没用，必须重启 start-server.bat —— 接口要把这件事告诉前端。
+
+/** 当前提交信息（版本徽标与更新比对都用它） */
+async function readGitVersion(cwd, ref = 'HEAD') {
+  const [hash, meta, branch, remote] = await Promise.all([
+    runGit(['rev-parse', '--short', ref], cwd),
+    runGit(['log', '-1', '--format=%H%n%ad%n%s', '--date=format:%Y-%m-%d %H:%M', ref], cwd),
+    runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd),
+    runGit(['remote', 'get-url', 'origin'], cwd).catch(() => ''),
+  ])
+  const [full = '', date = '', subject = ''] = meta.trim().split('\n')
+  return {
+    commit: hash.trim(),
+    full: full.trim(),
+    date: date.trim(),
+    subject: subject.trim(),
+    branch: branch.trim(),
+    remote: remote.trim(),
+  }
+}
+
+async function handleVersion(req, res) {
+  try {
+    const v = await readGitVersion(BASE_DIR)
+    const status = await runGit(['status', '--porcelain'], BASE_DIR)
+    json(res, { ...v, dirty: status.trim().length > 0 })
+  } catch (err) {
+    fail(res, 'VERSION_FAILED', `读取版本失败：${err.message}`, 500)
+  }
+}
+
+async function handleUpdateCheck(req, res) {
+  const cwd = BASE_DIR
+  try {
+    try {
+      await runGit(['rev-parse', '--is-inside-work-tree'], cwd)
+    } catch {
+      return json(res, { configured: false, hint: '这个目录不是 git 仓库，无法自动更新；请用 git clone 下来的一份。' })
+    }
+    const local = await readGitVersion(cwd)
+    if (!local.remote) {
+      return json(res, { configured: false, local, hint: '还没有配置远端仓库（git remote add origin …），无法检查更新。' })
+    }
+
+    // fetch 可能因为没登录 GitHub 而失败：这不是「没有更新」，要如实分开
+    try {
+      await runGit(['fetch', '--prune', 'origin'], cwd, 60000)
+    } catch (err) {
+      const auth = err.code === 'GIT_AUTH_REQUIRED'
+      return json(res, {
+        configured: true,
+        reachable: false,
+        local,
+        error: auth
+          ? '拉取需要 GitHub 登录（私有仓库）。请在本项目目录里先执行一次 git pull，按提示在浏览器里登录，之后这里就能直接更新。'
+          : `拉取失败：${err.message}`,
+      })
+    }
+
+    const upstream = `origin/${local.branch}`
+    let remoteLatest = null
+    try {
+      remoteLatest = await readGitVersion(cwd, upstream)
+    } catch {
+      return json(res, {
+        configured: true,
+        reachable: true,
+        local,
+        hasUpdate: false,
+        hint: `远端没有 ${upstream}，可能是还没推送过。`,
+      })
+    }
+    const counts = await runGit(['rev-list', '--left-right', '--count', `HEAD...${upstream}`], cwd)
+    const [ahead = 0, behind = 0] = counts.trim().split(/\s+/).map(Number)
+    const status = await runGit(['status', '--porcelain'], cwd)
+    json(res, {
+      configured: true,
+      reachable: true,
+      local,
+      remoteLatest,
+      ahead,
+      behind,
+      dirty: status.trim().length > 0,
+      hasUpdate: behind > 0,
+    })
+  } catch (err) {
+    fail(res, 'UPDATE_CHECK_FAILED', `检查更新失败：${err.message}`, 500)
+  }
+}
+
+async function handleUpdateApply(req, res) {
+  const cwd = BASE_DIR
+  try {
+    const local = await readGitVersion(cwd)
+    const status = await runGit(['status', '--porcelain'], cwd)
+    // 本地有未提交改动时拒绝：fast-forward 之外的情况硬拉会把人工改动卷进去
+    if (status.trim().length > 0) {
+      return fail(res, 'UPDATE_DIRTY', '本地有未提交的改动，先提交或还原再更新（避免更新把改动覆盖掉）', 409)
+    }
+    if (!local.remote) return fail(res, 'UPDATE_NO_REMOTE', '还没有配置远端仓库', 400)
+
+    const upstream = `origin/${local.branch}`
+    try {
+      await runGit(['pull', '--ff-only', 'origin', local.branch], cwd, 60000)
+    } catch (err) {
+      const code = err.code === 'GIT_AUTH_REQUIRED' ? 'UPDATE_AUTH_REQUIRED' : 'UPDATE_FAILED'
+      const message = err.code === 'GIT_AUTH_REQUIRED'
+        ? '拉取需要 GitHub 登录：请在本项目目录里手工执行一次 git pull 完成登录后再点更新'
+        : String(err.message || '').trim().split('\n')[0]
+      return fail(res, code, message, 400)
+    }
+
+    const to = await readGitVersion(cwd)
+    let files = []
+    try {
+      const diff = await runGit(['diff', '--name-only', `${local.full}..HEAD`], cwd)
+      files = diff.trim().split('\n').filter(Boolean)
+    } catch {}
+    json(res, {
+      ok: true,
+      from: local.commit,
+      to: to.commit,
+      subject: to.subject,
+      files,
+      // 引擎代码变了就必须重启进程，刷新页面没用 —— 前端据此给不同提示
+      engineChanged: files.some(f => f === 'server.js'),
+    })
+  } catch (err) {
+    fail(res, 'UPDATE_APPLY_FAILED', `更新失败：${err.message}`, 500)
+  }
+}
+
 // ===== 本地备份 =====
 //
 // 需求数据只存在浏览器的 localStorage 里：清缓存、换浏览器、换机器就没了，
@@ -999,6 +1138,9 @@ const ROUTES = {
   'GET /api/backup/list': handleBackupList,
   'GET /api/backup/read': handleBackupRead,
   'POST /api/backup/reveal': handleBackupReveal,
+  'GET /api/version': handleVersion,
+  'GET /api/update/check': handleUpdateCheck,
+  'POST /api/update/apply': handleUpdateApply,
 }
 
 const MIME_TYPES = {

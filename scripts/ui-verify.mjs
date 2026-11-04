@@ -193,11 +193,14 @@ try {
   check('页面标题渲染', await page.locator('h1.page-title').isVisible())
   check('需求行渲染', (await page.getByText('UI验证-销售预测').count()) > 0)
 
-  // 2) 端口修复：页面必须打到本进程端口，而不是写死的 1949
+  // 2) 端口修复：页面必须打到「端口文件里写的那个端口」，而不是写死的 1949。
+  //    注意不能写成「此时还没有 api 请求」——启动就会拉版本号，那个前提早就不成立了；
+  //    要判的是请求的目标端口，当 1949 被 v1 占着、引擎漂到 1950 时这条才会真正抓到问题。
+  const wrongPortCalls = apiCalls.filter(u => !u.includes(`localhost:${PORT}/`))
   check(
-    '启动时读取了 .server-port',
-    apiCalls.length === 0 || !apiCalls.some(u => u.includes(':1949/')),
-    `已捕获 ${apiCalls.length} 个 api 请求`,
+    '页面请求都打到本引擎端口',
+    wrongPortCalls.length === 0,
+    wrongPortCalls.length ? wrongPortCalls.slice(0, 3).join(' | ') : `已捕获 ${apiCalls.length} 个请求，端口 ${PORT}`,
   )
 
   // 3) 点「刷新分支索引」，等真实 git 分析完成
@@ -819,6 +822,42 @@ try {
     await portPage.close()
   }
   check('端口正常时不显示该提示', (await page.locator('.port-note').count()) === 0)
+
+  // ===== 15) 版本徽标与一键更新 =====
+  // 页面就是这个 git 仓库，所以「点版本号」= 检查并拉取最新代码。
+  // 远端可能还没有（还没建私有仓库）、也可能刚推送过，两种情况都必须「不误报有更新、不乱刷新」。
+  const localShort = require('node:child_process')
+    .execSync('git rev-parse --short HEAD', { cwd: PROJECT_DIR }).toString().trim()
+  const versionBody = JSON.parse((await rawGet('/api/version')).body)
+  check('版本接口返回当前提交', versionBody.commit === localShort && versionBody.branch === 'master',
+    `${versionBody.commit} / ${versionBody.branch}`)
+
+  const checkApi = JSON.parse((await rawGet('/api/update/check')).body)
+  // 契约：拉不到时**不能**出现 hasUpdate=true（否则断网会被报成「有新版本」）
+  const checkShapeOk = checkApi.configured === true
+    && (checkApi.reachable === false
+      ? typeof checkApi.error === 'string' && checkApi.hasUpdate === undefined
+      : typeof checkApi.hasUpdate === 'boolean' && (!checkApi.hasUpdate || checkApi.behind > 0))
+  check('检查更新接口结构正确、不误报', checkShapeOk,
+    checkApi.reachable === true
+      ? `与远端 ${checkApi.hasUpdate ? `相差 ${checkApi.behind} 个提交` : '一致'}（本地 ${checkApi.local.commit}）`
+      : String(checkApi.error || '').slice(0, 70))
+
+  check('页头显示版本徽标', ((await page.locator('.version-badge').textContent()) || '').includes(localShort),
+    ((await page.locator('.version-badge').textContent()) || '').trim())
+  if (checkApi.hasUpdate) {
+    check('远端确实有新版本时不在验证里点它', true, `behind=${checkApi.behind}，跳过点击以免把验证环境刷成新版`)
+  } else {
+    // 打一个标记，点完徽标后它还在 ⇒ 没有发生「无更新却把页面刷走」的误操作
+    await page.evaluate(() => { window.__stayAlive = 1 })
+    await page.locator('.version-badge').click()
+    await page.waitForTimeout(2500)
+    const versionToast = ((await page.locator('.toast.show').textContent()) || '').trim()
+    check('点版本号给出明确结果（已是最新 / 拉取失败原因）',
+      /已是最新版本|拉取失败|检查更新失败|需要 GitHub 登录/.test(versionToast), versionToast)
+    check('无更新时不会把页面刷掉',
+      (await page.evaluate(() => window.__stayAlive)) === 1)
+  }
 
   // toDo.json 不存在时的 404 是 v1 既有正常分支（loadFromJsonFile 会静默回退 localStorage）；
   // favicon 缺失与功能无关。除这两者外出现 4xx/5xx 都算回归。

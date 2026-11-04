@@ -102,6 +102,9 @@ createApp({
         excludeStatuses: ['已结束', '已上线'],
       },
       syncSettings: { visible: false, loading: false, error: '', spaces: [], types: [] },
+      // 版本徽标：点它就是「检查并更新」
+      appVersion: { commit: '', date: '', subject: '', branch: '', remote: '', dirty: false },
+      updateBusy: false,
       // 备份到项目 backup/ 目录：列表、恢复与目录路径都由引擎给
       backupDialog: { visible: false, loading: false, error: '', dir: '', files: [], pendingRestore: '' },
       syncDialog: { visible: false, loading: false, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: false },
@@ -329,6 +332,52 @@ createApp({
         document.body.appendChild(ta); ta.select()
         document.execCommand('copy'); document.body.removeChild(ta)
         toast('\u2713 ' + text)
+      }
+    }
+
+    // ===== 版本与一键更新 =====
+    //
+    // 页面就是这个 git 仓库里的静态文件，「在项目目录里 git pull」等于更新应用。
+    // 所以同事只需要点页头的版本号：有新版就拉、拉完刷新；引擎代码变了则提示重启服务。
+
+    async function loadAppVersion() {
+      try {
+        const res = await fetch(apiUrl('/api/version'))
+        const data = await res.json()
+        if (data.code) return
+        state.appVersion = { ...state.appVersion, ...data, checkedAt: Date.now() }
+      } catch {}
+    }
+
+    async function checkUpdate() {
+      if (state.updateBusy) return
+      state.updateBusy = true
+      try {
+        const res = await fetch(apiUrl('/api/update/check'))
+        const d = await res.json()
+        if (d.code) throw new Error(d.error || d.code)
+        if (d.local) state.appVersion = { ...state.appVersion, ...d.local }
+        if (!d.configured) { toast(d.hint || '还没有配置远端仓库，无法检查更新'); return }
+        if (d.reachable === false) { toast(d.error || '拉取失败'); return }
+        if (!d.hasUpdate) {
+          toast(`已是最新版本 ${d.local.commit}${d.dirty ? '（本地有未提交改动）' : ''}`)
+          return
+        }
+        // 点这一下就是为了拿到最新代码，所以直接拉，不再二次确认
+        const r2 = await fetch(apiUrl('/api/update/apply'), { method: 'POST' })
+        const d2 = await r2.json()
+        if (d2.code) throw new Error(d2.error || d2.code)
+        state.appVersion = { ...state.appVersion, commit: d2.to, subject: d2.subject }
+        if (d2.engineChanged) {
+          toast(`已更新到 ${d2.to}，但这次改动包含引擎代码：请关掉服务窗口、重跑 start-server.bat，再刷新页面`)
+          return
+        }
+        toast(`已更新到 ${d2.to}，正在刷新页面...`)
+        setTimeout(() => location.reload(), 1200)
+      } catch (e) {
+        toast(`检查更新失败：${e.message}`)
+      } finally {
+        state.updateBusy = false
       }
     }
 
@@ -1658,6 +1707,7 @@ createApp({
 
       checkDailyReminder()
       autoFetchBranches()
+      loadAppVersion()
     })
 
     async function loadFromJsonFile() {
@@ -1746,6 +1796,9 @@ createApp({
       indexDiagnostics,
       portShifted,
       apiPort: computed(() => api.port),
+      loadAppVersion, checkUpdate,
+      appVersion: computed(() => state.appVersion),
+      updateBusy: computed(() => state.updateBusy),
       indexConfig: computed(() => state.indexConfig),
       indexNotMineTotal,
       // v2 飞书同步别名

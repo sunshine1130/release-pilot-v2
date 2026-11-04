@@ -360,4 +360,18 @@
 6. THE The_App SHALL 不把 `backup/` 纳入版本管理（内含真实需求数据）。
 7. WHEN 引擎端口与默认端口不一致，THE The_App SHALL 提示「浏览器按来源隔离数据」，避免用户把换端口看成数据丢失。
 
+### Requirement 26: 分享给同事与一键更新
+
+**User Story:** 作为发版负责人，我希望把工具放到私有仓库分享给同事，并在自己更新后让同事点一下就能拿到最新代码。
+
+#### Acceptance Criteria
+
+1. THE The_App SHALL 能在项目目录内通过 `git pull --ff-only` 完成自身更新（页面即仓库里的静态文件，不需要另做分发渠道）。
+2. THE The_App SHALL 在页头展示当前版本（提交短哈希），点击即「检查并拉取最新代码」；确有新版本时拉取完成后自动刷新页面。
+3. THE The_App SHALL 区分「没有新版本」「远端拉不到（未登录/不存在/断网）」两种结果，**不得把拉取失败报成有新版本**。
+4. WHEN 本次更新改动了 `server.js`，THE The_App SHALL 提示必须重启引擎（`start-server.bat`），而不是只让用户刷新页面。
+5. IF 本地存在未提交改动，THEN THE The_App SHALL 拒绝更新并说明原因，不得让更新卷走人工改动。
+6. THE The_App SHALL 提供 `更新.bat` 作为引擎未运行时的等价更新入口。
+7. THE The_App SHALL 在文档中说明同事的接入步骤（加协作者、克隆、各自配置项目与飞书登录），并说明哪些配置不随仓库分享。
+
 
