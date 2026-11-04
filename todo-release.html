@@ -512,15 +512,17 @@
         </div>
         <div class="sync-list">
           <template v-for="g in syncGroups" :key="g.status">
-            <div class="sync-group-header">
+            <div class="sync-group-header" @click="toggleGroupCollapse(g.status)">
+              <span class="arrow" :class="{open:!syncCollapsed[g.status]}">▶</span>
               <span class="sync-group-name">{{g.status}}</span>
               <span class="sync-group-count">{{g.total}} 条<span v-if="g.newCount !== g.total">（其中新增 {{g.newCount}}）</span></span>
               <span style="flex:1"></span>
               <span v-if="g.selected" class="sync-group-sel">已选 {{g.selected}}</span>
-              <button v-if="g.newCount" class="btn btn-outline btn-xs" @click="toggleGroup(g)">
+              <button v-if="g.newCount" class="btn btn-outline btn-xs" @click.stop="toggleGroup(g)">
                 {{g.selected >= g.newCount ? '取消本组' : '全选本组'}}
               </button>
             </div>
+            <template v-if="!syncCollapsed[g.status]">
             <div v-for="r in g.rows" :key="r.workItemId" class="sync-row" :class="{existing:!r.isNew}">
               <input type="checkbox" :checked="!!syncSelection[r.workItemId]" :disabled="!r.isNew" @change="toggleSyncRow(r.workItemId)">
               <div class="sync-row-main">
@@ -544,6 +546,7 @@
               </div>
               <a class="sync-link" :href="r.link" target="_blank" title="打开飞书需求">↗</a>
             </div>
+            </template>
           </template>
           <div v-if="!syncRows.length" class="sync-hint" style="padding:20px;text-align:center">
             没有符合条件的需求<span v-if="syncDialog.onlyUnregistered">（当前只显示未导入的，若上一批已全部导入，这里为空属正常）</span>

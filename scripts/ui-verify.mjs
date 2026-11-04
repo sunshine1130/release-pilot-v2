@@ -148,8 +148,20 @@ try {
   )
 
   // 3) 点「刷新分支索引」，等真实 git 分析完成
+  // 未登记分支面板默认收起，展开态要通过 .collapse-body 的 class 判断 ——
+  // 用卡片数判断会在「本来就没有卡片」时误点一下，反而把已展开的面板收起来
+  const expandUnreg = async () => {
+    if ((await page.locator('.unreg-panel .collapse-body.expanded').count()) === 0) {
+      await page.locator('.unreg-panel .pm-header').click()
+      await page.waitForTimeout(300)
+    }
+  }
   await page.getByRole('button', { name: /刷新分支索引/ }).click()
-  await page.getByText('feat/mdm二期分支').first().waitFor({ timeout: 180000 })
+  check('未登记分支面板默认收起',
+    (await page.locator('.unreg-panel .collapse-body.expanded').count()) === 0)
+  await page.locator('.unreg-panel .hint', { hasText: '条分支查不到需求登记' }).waitFor({ timeout: 180000 })
+  await expandUnreg()
+  await page.getByText('feat/mdm二期分支').first().waitFor({ timeout: 60000 })
 
   check(
     '索引请求打到本引擎端口',
@@ -187,7 +199,8 @@ try {
   check('刷新后处置状态保持',
     (await cardOf('feat/mdm二期分支').count()) === 0 && (await page.getByText(/已处置 \d+ 条/).count()) > 0)
 
-  // 7) 恢复
+  // 7) 恢复（上一步 reload 过，面板回到默认收起态，点之前要先展开）
+  await expandUnreg()
   await page.getByRole('link', { name: '恢复' }).first().click()
   await page.waitForTimeout(300)
   check('恢复后卡片回来', (await cardOf('feat/mdm二期分支').count()) === 1)
@@ -196,6 +209,15 @@ try {
   // 两个弹窗共用 .sync-box，选择器必须按容器区分，否则 Playwright 严格模式会因多匹配报错
   const settingsBox = page.locator('.sync-box:not(.sync-box-wide)')
   const previewBox = page.locator('.sync-box-wide')
+  // 「只看未导入」现在默认**不勾选**（不替用户做筛选决定），所以需要显式设置，
+  // 不能再用「点一下就是取消」的写法 —— 那会把它反而勾上
+  const onlyUnregBox = previewBox.locator('.sync-toolbar input[type=checkbox]')
+  const setOnlyUnregistered = async want => {
+    if ((await onlyUnregBox.isChecked()) !== want) {
+      await previewBox.getByText('只看未导入').click()
+      await page.waitForTimeout(300)
+    }
+  }
 
   await page.evaluate(
     ({ cfg, branchId }) => {
@@ -220,6 +242,9 @@ try {
   await previewBox.locator('.sync-row').first().waitFor({ timeout: 240000 })
   const rowCount = await previewBox.locator('.sync-row').count()
   check('同步预览拉到飞书需求', rowCount > 0, `${rowCount} 行`)
+  // 不该替用户做决定：既不预勾选需求，也不默认打开「只看未导入」筛选
+  check('预览默认不勾选任何需求', (await previewBox.locator('.sync-row input:checked').count()) === 0)
+  check('「只看未导入」默认不勾选', (await onlyUnregBox.isChecked()) === false)
 
   const summary = await previewBox.locator('.sync-summary-item').allTextContents()
   const okSummary = summary.filter(s => /\d+\/\d+/.test(s))
@@ -248,11 +273,30 @@ try {
   await page.waitForTimeout(200)
   check('整组取消生效', (await firstGroup.locator('.sync-group-sel').count()) === 0)
 
+  // 分组默认展开（一次上百条，默认全展开才能一眼看到内容），点分组头可收起
+  const rowsBeforeCollapse = await previewBox.locator('.sync-row').count()
+  check('分组默认展开', rowsBeforeCollapse > 1, `${rowsBeforeCollapse} 行`)
+  await firstGroup.click()
+  await page.waitForTimeout(200)
+  const rowsCollapsed = await previewBox.locator('.sync-row').count()
+  check('点击分组头收起', rowsCollapsed < rowsBeforeCollapse, `${rowsBeforeCollapse} → ${rowsCollapsed} 行`)
+  // 收起态下按钮必须仍可用：@click.stop 的存在就是为了不让勾选动作顺带把分组展开
+  await firstGroup.getByRole('button', { name: '全选本组' }).click()
+  await page.waitForTimeout(300)
+  check('收起态下仍能整组勾选', (await firstGroup.locator('.sync-group-sel').count()) > 0,
+    `分组「${firstGroupName}」`)
+  await firstGroup.getByRole('button', { name: '取消本组' }).click()
+  await page.waitForTimeout(200)
+  check('收起态下取消勾选不会展开', (await previewBox.locator('.sync-row').count()) === rowsCollapsed)
+  await firstGroup.click()
+  await page.waitForTimeout(200)
+  check('再次点击分组头展开', (await previewBox.locator('.sync-row').count()) === rowsBeforeCollapse)
+
   const l1 = await previewBox.locator('.sync-row', { hasText: '7153729281' }).locator('.sync-branch.via-L1').count()
   check('按需求ID自动匹配到分支（L1）', l1 > 0)
   await page.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-sync.png'), fullPage: false })
 
-  await previewBox.getByText('只看未导入').click()
+  await setOnlyUnregistered(false)
   await page.waitForTimeout(200)
   const doneTag = await previewBox.locator('.sync-row', { hasText: '7154016953' }).locator('.sync-tag-done').count()
   check('已导入的需求被标记', doneTag > 0)
@@ -266,11 +310,10 @@ try {
   const totalAfter = (await page.locator('h1 .sub').textContent()) || ''
   check('导入后需求总数增加', totalBefore !== totalAfter, `${totalBefore.trim()} → ${totalAfter.trim()}`)
 
-  // 再拉一次验证去重：注意必须**先取消「只看未导入」**——
-  // 全部刚导入完时该筛选下本来就 0 行，直接等行会出现只会是测试自己的错
+  // 再拉一次验证去重：需要看见已导入的那些，所以显式关闭「只看未导入」筛选
   await page.getByRole('button', { name: '同步飞书项目' }).click()
   await previewBox.locator('.sync-row, .sync-hint').first().waitFor({ timeout: 240000 })
-  await previewBox.getByText('只看未导入').click()
+  await setOnlyUnregistered(false)
   await page.waitForTimeout(300)
   const dedup = await previewBox.locator('.sync-row', { hasText: firstNewId }).locator('.sync-tag-done').count()
   check('重复同步不产生重复需求（按 workItemId 去重）', dedup > 0, `刚导入的 ${firstNewId}`)
@@ -397,10 +440,8 @@ try {
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: '同步飞书项目' }).click()
   await previewBox.getByPlaceholder('按名称或需求ID筛选...').waitFor({ timeout: 300000 })
-  // 前序阶段已经导入过约 100 条，7134246577 很可能就在其中；
-  // 「只看未导入」是默认勾选的，不取消掉会把它过滤掉，等不到分支徽标
-  await previewBox.getByText('只看未导入').click()
-  await page.waitForTimeout(300)
+  // 前序阶段已经导入过约 100 条，7134246577 很可能就在其中，需要看得见它才能验证分支匹配
+  await setOnlyUnregistered(false)
   await previewBox.getByPlaceholder('按名称或需求ID筛选...').fill('7134246577')
   await page.waitForTimeout(800)
   await previewBox.locator('.sync-branch').first().waitFor({ timeout: 60000 })

@@ -74,7 +74,9 @@ createApp({
       indexProgress: { visible: false, done: 0, total: 0 },
       branchLinks: {}, // { '项目\u0000分支': [需求ID] }
       branchTriage: {}, // { '项目\u0000分支': { action:'exempt'|'ignored', at } }
-      unregExpanded: true,
+      // 未登记分支面板默认收起：它是「需要你确认的例外」，不是每天都要看的主线内容；
+      // 折叠时标题上仍会显示条数，不会漏。
+      unregExpanded: false,
 
       // ↓↓↓ v2 新增：飞书项目同步 ↓↓↓
       meegleStatus: { authenticated: null, host: '', error: '' },
@@ -89,9 +91,11 @@ createApp({
         excludeStatuses: ['已结束', '已上线'],
       },
       syncSettings: { visible: false, loading: false, error: '', spaces: [], types: [] },
-      syncDialog: { visible: false, loading: false, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: true },
+      syncDialog: { visible: false, loading: false, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: false },
       syncRaw: [],
       syncSelection: {},
+      // 状态分组里被手动收起的那些（默认全部展开：要勾选就得先看得见）
+      syncCollapsed: {},
       // 分支索引只保留自己创建的分支：同事的分支混进未登记列表与匹配结果纯是噪声
       indexConfig: { onlyMine: true }
     })
@@ -1208,8 +1212,9 @@ createApp({
         if (eligible.length) await refreshBranchIndex(false)
       }
 
-      state.syncDialog = { visible: true, loading: true, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: true }
+      state.syncDialog = { visible: true, loading: true, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: false }
       state.syncSelection = {}
+      state.syncCollapsed = {}
       try {
         await fetchMeegleItems()
       } catch (e) {
@@ -1356,6 +1361,11 @@ createApp({
         else next[r.workItemId] = true
       }
       state.syncSelection = next
+    }
+
+    /** 收起/展开某个状态分组。收起只影响显示，不影响已勾选的项 */
+    function toggleGroupCollapse(status) {
+      state.syncCollapsed = { ...state.syncCollapsed, [status]: !state.syncCollapsed[status] }
     }
 
     /** 导入选中项：只建新需求，已存在的默认不动（保护本地已人工调整过的数据） */
@@ -1521,8 +1531,10 @@ createApp({
       syncRows,
       syncGroups,
       toggleGroup,
+      toggleGroupCollapse,
       syncIndexHint,
-      syncSelectedCount
+      syncSelectedCount,
+      syncCollapsed: computed(() => state.syncCollapsed),
     }
   }
 }).mount('#app')

@@ -1614,3 +1614,11 @@ input[data-role="syncProjectName"] {
   display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
   font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none;
 }
+/* v2: 同步预览的状态分组可收起（.arrow 在既有样式里是按父容器限定的，
+   这里补一份同样的旋转效果，不改动既有规则、避免影响其它面板） */
+.sync-group-header { cursor: pointer; }
+.sync-group-header .arrow {
+  transition: transform var(--transition);
+  font-size: 11px; color: var(--text-muted); display: inline-block;
+}
+.sync-group-header .arrow.open { transform: rotate(90deg); }
