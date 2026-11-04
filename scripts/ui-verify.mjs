@@ -222,8 +222,31 @@ try {
   check('同步预览拉到飞书需求', rowCount > 0, `${rowCount} 行`)
 
   const summary = await previewBox.locator('.sync-summary-item').allTextContents()
-  check('按工作项类型汇总展示', summary.length > 0, summary.join(' | ').slice(0, 140))
+  const okSummary = summary.filter(s => /\d+\/\d+/.test(s))
+  check('按工作项类型汇总展示（两个类型都成功）', okSummary.length === 2, summary.join(' | ').slice(0, 160))
+  // 状态名是每个类型各自一套的（story 有「已上线」、oms 没有），服务端必须按类型取交集后再过滤。
+  // 这条断言同时覆盖「没有把不存在的状态写进 WHERE」——写错会直接报 metadata error。
+  check('汇总里标注了各类型实际排除的状态',
+    summary.some(s => s.includes('已排除')),
+    summary.join(' | ').slice(0, 200))
   check('拉取无类型级错误', (await previewBox.locator('.sync-summary-err').count()) === 0)
+
+  // 状态分组：一次拉上百条混在一起没法判断该发哪些，按状态切开才能整组勾选
+  const groupNames = (await previewBox.locator('.sync-group-name').allTextContents()).map(s => s.trim())
+  check('预览按状态分组', groupNames.length > 0, groupNames.join(' | '))
+  check('已完成状态已被排除（不在预览里）',
+    !groupNames.some(n => /已结束|已上线/.test(n)),
+    groupNames.join(' | '))
+
+  const firstGroup = previewBox.locator('.sync-group-header').first()
+  const firstGroupName = (await firstGroup.locator('.sync-group-name').textContent() || '').trim()
+  await firstGroup.getByRole('button', { name: '全选本组' }).click()
+  await page.waitForTimeout(300)
+  const groupSelected = await firstGroup.locator('.sync-group-sel').count()
+  check('整组勾选生效', groupSelected > 0, `分组「${firstGroupName}」`)
+  await firstGroup.getByRole('button', { name: '取消本组' }).click()
+  await page.waitForTimeout(200)
+  check('整组取消生效', (await firstGroup.locator('.sync-group-sel').count()) === 0)
 
   const l1 = await previewBox.locator('.sync-row', { hasText: '7153729281' }).locator('.sync-branch.via-L1').count()
   check('按需求ID自动匹配到分支（L1）', l1 > 0)

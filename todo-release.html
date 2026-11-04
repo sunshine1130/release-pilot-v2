@@ -466,6 +466,11 @@
         <label>每个类型最多拉取</label>
         <input v-model.number="meegleConfig.maxPerType" type="number" min="50" step="50" class="sync-input" style="width:120px">
       </div>
+      <div class="sync-field">
+        <label>排除状态<small>逗号分隔。这些状态的需求不会被拉取（如「已结束」占了大半张表，白拉还占额度）</small></label>
+        <input :value="(meegleConfig.excludeStatuses||[]).join(',')" @input="setExcludeStatuses($event.target.value)"
+               class="sync-input" style="width:320px" placeholder="如：已结束,已上线（留空则不过滤）">
+      </div>
     </div>
     <div class="sync-footer">
       <span class="sync-hint" v-if="syncSettings.loading">加载中...</span>
@@ -488,7 +493,7 @@
       <div v-else-if="syncDialog.error" class="sync-error">{{syncDialog.error}}</div>
       <template v-else>
         <div class="sync-summary">
-          <span v-for="t in syncDialog.perType" :key="t.apiName" class="sync-summary-item">{{t.name}}：{{t.fetched}}/{{t.count}}</span>
+          <span v-for="t in syncDialog.perType" :key="t.apiName" class="sync-summary-item">{{t.name}}：{{t.fetched}}/{{t.count}}<small v-if="t.excluded&&t.excluded.length" class="sync-summary-excluded">（已排除 {{t.excluded.join('/')}}）</small></span>
           <span v-for="e in syncDialog.errors" :key="e.apiName" class="sync-summary-item sync-summary-err">{{e.name}} 失败：{{e.message}}</span>
         </div>
         <div class="sync-toolbar">
@@ -499,29 +504,39 @@
           <button class="btn btn-outline btn-xs" @click="selectAllNew">全选新增</button>
         </div>
         <div class="sync-list">
-          <div v-for="r in syncRows" :key="r.workItemId" class="sync-row" :class="{existing:!r.isNew}">
-            <input type="checkbox" :checked="!!syncSelection[r.workItemId]" :disabled="!r.isNew" @change="toggleSyncRow(r.workItemId)">
-            <div class="sync-row-main">
-              <div class="sync-row-name" :title="r.name">{{r.name||'(无名称)'}}</div>
-              <div class="sync-row-meta">
-                <span class="sync-id">{{r.workItemId}}</span>
-                <span class="sync-tag">{{r.status||'-'}}</span>
-                <span class="sync-tag">{{r.workItemTypeName}}</span>
-                <span v-if="!r.isNew" class="sync-tag sync-tag-done">已导入</span>
+          <template v-for="g in syncGroups" :key="g.status">
+            <div class="sync-group-header">
+              <span class="sync-group-name">{{g.status}}</span>
+              <span class="sync-group-count">{{g.total}} 条<span v-if="g.newCount !== g.total">（其中新增 {{g.newCount}}）</span></span>
+              <span style="flex:1"></span>
+              <span v-if="g.selected" class="sync-group-sel">已选 {{g.selected}}</span>
+              <button v-if="g.newCount" class="btn btn-outline btn-xs" @click="toggleGroup(g)">
+                {{g.selected >= g.newCount ? '取消本组' : '全选本组'}}
+              </button>
+            </div>
+            <div v-for="r in g.rows" :key="r.workItemId" class="sync-row" :class="{existing:!r.isNew}">
+              <input type="checkbox" :checked="!!syncSelection[r.workItemId]" :disabled="!r.isNew" @change="toggleSyncRow(r.workItemId)">
+              <div class="sync-row-main">
+                <div class="sync-row-name" :title="r.name">{{r.name||'(无名称)'}}</div>
+                <div class="sync-row-meta">
+                  <span class="sync-id">{{r.workItemId}}</span>
+                  <span class="sync-tag">{{r.workItemTypeName}}</span>
+                  <span v-if="!r.isNew" class="sync-tag sync-tag-done">已导入</span>
+                </div>
               </div>
+              <div class="sync-row-branches">
+                <template v-if="r.matches.length">
+                  <span v-for="m in r.matches" :key="m.project+m.branch" class="sync-branch" :class="'via-'+m.via"
+                        :title="m.branch + (m.otherBranches.length ? '；该项目另有：' + m.otherBranches.join(' / ') : '')">
+                    {{m.project}} · {{truncateBranch(m.branch, 24)}}
+                    <span v-if="m.otherBranches.length" class="sync-branch-more">+{{m.otherBranches.length}}</span>
+                  </span>
+                </template>
+                <span v-else class="sync-branch-none">未匹配到分支</span>
+              </div>
+              <a class="sync-link" :href="r.link" target="_blank" title="打开飞书需求">↗</a>
             </div>
-            <div class="sync-row-branches">
-              <template v-if="r.matches.length">
-                <span v-for="m in r.matches" :key="m.project+m.branch" class="sync-branch" :class="'via-'+m.via"
-                      :title="m.branch + (m.otherBranches.length ? '；该项目另有：' + m.otherBranches.join(' / ') : '')">
-                  {{m.project}} · {{truncateBranch(m.branch, 24)}}
-                  <span v-if="m.otherBranches.length" class="sync-branch-more">+{{m.otherBranches.length}}</span>
-                </span>
-              </template>
-              <span v-else class="sync-branch-none">未匹配到分支</span>
-            </div>
-            <a class="sync-link" :href="r.link" target="_blank" title="打开飞书需求">↗</a>
-          </div>
+          </template>
           <div v-if="!syncRows.length" class="sync-hint" style="padding:20px;text-align:center">
             没有符合条件的需求<span v-if="syncDialog.onlyUnregistered">（当前只显示未导入的，若上一批已全部导入，这里为空属正常）</span>
           </div>

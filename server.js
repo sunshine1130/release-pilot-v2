@@ -151,7 +151,7 @@ async function runMeegle(args, timeoutMs = 90000) {
       throw { code: 'MEEGLE_TIMEOUT', message: `meegle 调用超时（${timeoutMs}ms）` }
     }
     const stderr = String(err.stderr || err.message || '')
-    throw { code: 'MEEGLE_QUERY_FAILED', message: stderr.trim().split('\n')[0] || 'meegle 调用失败' }
+    throw { code: 'MEEGLE_QUERY_FAILED', message: extractMeegleError(stderr) || 'meegle 调用失败' }
   }
 }
 
@@ -169,14 +169,61 @@ function safeJsonParse(text) {
   }
 }
 
+/**
+ * 从 CLI 输出里挖出可读的错误原因。
+ *
+ * CLI 失败时会把整段 JSON 错误写到 stderr，第一行只有一个 `{`；
+ * 直接取首行会得到一个毫无信息量的「{」，排查时完全没用（实测踩过）。
+ * 所以优先解析 JSON 取 message，其次挑一条有内容的行。
+ */
+function extractMeegleError(raw) {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  const parsed = safeJsonParse(text)
+  if (parsed) {
+    const e = parsed.error || parsed.err_msg
+    if (typeof e === 'string' && e) return e
+    if (e && typeof e === 'object') return e.message || e.code || JSON.stringify(e)
+  }
+  const line = text
+    .split('\n')
+    .map(l => l.trim())
+    .find(l => l && l !== '{' && l !== '}' && l !== '[' && l !== ']')
+  return (line || text).slice(0, 400)
+}
+
 async function meegleJson(args) {
   const out = await runMeegle([...args, '--format', 'json'])
   const data = safeJsonParse(out)
   if (data === null) throw { code: 'MEEGLE_QUERY_FAILED', message: '飞书项目返回内容无法解析为 JSON' }
-  // CLI 把业务失败也包在 200 里，必须看 err_msg / error 字段
-  const msg = data.err_msg || data.error || (data.data && data.data.err_msg)
-  if (msg) throw { code: 'MEEGLE_QUERY_FAILED', message: String(msg) }
+  // CLI 把业务失败也包在正常退出里，必须看 err_msg / error 字段
+  const err = data.err_msg || data.error
+  if (err) throw { code: 'MEEGLE_QUERY_FAILED', message: extractMeegleError(JSON.stringify(err)) || '飞书项目返回错误' }
   return data
+}
+
+/**
+ * 取某类型「需求状态」的可选值。
+ *
+ * 这一步不能省：状态名是**每个工作项类型各自一套**的，MQL 里写了该类型不存在的状态值
+ * 会直接报 metadata error（Code 3011），而不是匹配为空。实测 story 有 34 个状态（含「已上线」），
+ * oms 只有 17 个、没有「已上线」—— 共用一份排除清单必然炸掉其中一个类型。
+ * 状态枚举极少变动，缓存 1 小时。
+ */
+async function meegleStatusOptions(projectKey, typeApiName) {
+  const cacheKey = `statusopt:${projectKey}:${typeApiName}`
+  const hit = cacheGet(cacheKey, 60 * 60 * 1000)
+  if (hit) return hit
+  const data = await meegleJson([
+    'workitem', 'meta-fields',
+    '--project-key', projectKey,
+    '--work-item-type', typeApiName,
+    '--field-keys', '["work_item_status"]',
+  ])
+  const field = ((data.data && data.data.list) || data.list || [])[0] || {}
+  const names = (field.option || []).map(o => o.option_name).filter(Boolean)
+  cacheSet(cacheKey, names)
+  return names
 }
 
 async function meegleStatus() {
@@ -227,16 +274,37 @@ async function meegleQueryPage({ projectKey, mql, sessionId, groupId, pageNum })
  * （实测 ly_oms 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 个），
  * 只查其中一张会静默漏掉其他域的全部需求 —— 而这正是发版要收集的东西。
  */
-async function meegleQueryAll({ projectKey, simpleName, types, mqlTemplate, maxPerType }) {
+async function meegleQueryAll({ projectKey, simpleName, types, mqlTemplate, excludeStatuses, maxPerType }) {
   const items = []
   const perType = []
   const errors = []
   const pageSize = 50
 
+  // 用户想排除的状态（如「已结束」「已上线」）。是否真的能用于某个类型，
+  // 要跟该类型自己的状态枚举取交集后再决定 —— 见 meegleStatusOptions 的说明。
+  const wanted = (Array.isArray(excludeStatuses) ? excludeStatuses : [])
+    .map(s => String(s).trim())
+    .filter(Boolean)
+
   for (const t of types) {
+    let applied = []
+    if (wanted.length) {
+      try {
+        const options = await meegleStatusOptions(projectKey, t.apiName)
+        // options 为空说明没取到枚举，此时宁可不过滤，也不要硬套导致整类型查询失败
+        applied = options.length ? wanted.filter(s => options.includes(s)) : []
+      } catch {
+        applied = []
+      }
+    }
+    const statusFilter = applied.length
+      ? ` WHERE \`work_item_status\` NOT IN (${applied.map(s => `'${s.replace(/['"\\]/g, '')}'`).join(',')})`
+      : ''
+
     const mql = String(mqlTemplate)
       .replace(/\{space\}/g, simpleName)
       .replace(/\{type\}/g, t.typeKey)
+      .replace(/\{statusFilter\}/g, statusFilter)
     try {
       const first = await meegleQueryPage({ projectKey, mql })
       const groups = (first.list && first.list[0] && first.list[0].group_infos) || [{ group_id: '1' }]
@@ -273,7 +341,7 @@ async function meegleQueryAll({ projectKey, simpleName, types, mqlTemplate, maxP
         if (fetched === before) break // 拿不到新数据就停，避免无意义翻页
       }
 
-      perType.push({ apiName: t.apiName, name: t.name, count, fetched })
+      perType.push({ apiName: t.apiName, name: t.name, count, fetched, excluded: applied })
     } catch (e) {
       // 单个类型失败不影响其他类型：某个域没权限时不该让整次同步全废
       errors.push({ apiName: t.apiName, name: t.name, message: e.message || String(e) })
@@ -311,7 +379,7 @@ async function handleMeegleTypes(req, res, query) {
 
 async function handleMeegleQuery(req, res) {
   const body = await readJsonBody(req)
-  const { projectKey, simpleName, types, mqlTemplate, maxPerType } = body || {}
+  const { projectKey, simpleName, types, mqlTemplate, excludeStatuses, maxPerType } = body || {}
   if (!projectKey) return fail(res, 'BAD_REQUEST', '缺少 projectKey')
   if (!Array.isArray(types) || !types.length) return fail(res, 'BAD_REQUEST', '至少选择一种工作项类型')
   if (!mqlTemplate || !/\{type\}/.test(mqlTemplate)) {
@@ -323,6 +391,7 @@ async function handleMeegleQuery(req, res) {
       simpleName: simpleName || projectKey,
       types,
       mqlTemplate,
+      excludeStatuses,
       maxPerType: Number(maxPerType) > 0 ? Number(maxPerType) : 200,
     })
     json(res, result)

@@ -1590,3 +1590,15 @@ input[data-role="syncProjectName"] {
 /* v2: 按钮禁用态。v1 的样式里没有 :disabled，禁用按钮看起来仍可点，
    用户会反复点一个不会响应的按钮（「导入选中 0 条」第一次出现时就踩到了）。 */
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* v2: 同步预览的状态分组头 */
+.sync-group-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: var(--surface-raised);
+  border-bottom: 1px solid var(--border-light);
+  position: sticky; top: 0; z-index: 1;
+}
+.sync-group-name { font-size: 12px; font-weight: 600; color: var(--text); }
+.sync-group-count { font-size: 11px; color: var(--text-muted); }
+.sync-group-sel { font-size: 11px; color: var(--accent); }
+.sync-summary-excluded { color: var(--text-muted); margin-left: 2px; }

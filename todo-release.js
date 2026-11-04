@@ -80,8 +80,12 @@ createApp({
       meegleConfig: {
         projectKey: '', simpleName: '', spaceName: '',
         typeApiNames: [],
-        mqlTemplate: 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`',
+        mqlTemplate: 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`{statusFilter}',
         maxPerType: 200,
+        // 已完成的需求不该出现在发版清单里。实测 ly_oms 的 story 表 805 条中
+        // 已结束 335 + 已上线 412，真正还在流程中的只有 58 条 —— 不排除的话，
+        // 拉回来的绝大部分是废数据，还会把 maxPerType 的额度占满。
+        excludeStatuses: ['已结束', '已上线'],
       },
       syncSettings: { visible: false, loading: false, error: '', spaces: [], types: [] },
       syncDialog: { visible: false, loading: false, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: true },
@@ -987,7 +991,22 @@ createApp({
     // （实测 ly_oms 有 OMS/SCM/TMS/BMS/BD/仓库/优化/架构运维/AI 共 10 张），
     // 所以类型是多选，只查一张会静默漏掉其他域的全部需求。
 
-    const DEFAULT_MQL = 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`'
+    // {statusFilter} 由 buildStatusFilter 生成；旧配置里的模板没有这个占位符，
+    // 会在加载时自动升级（见 onMounted），否则老用户升级后过滤会静默失效
+    const DEFAULT_MQL = 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`{statusFilter}'
+    const LEGACY_MQL = 'SELECT `work_item_id`,`name`,`work_item_status` FROM `{space}`.`{type}`'
+
+    /**
+     * 排除状态由服务端按「类型 × 该类型的状态枚举」取交集后应用：
+     * 各类型的状态集不一样（实测 story 有「已上线」、oms 没有），前端不能拼成一个
+     * 全局 WHERE 片段下发 —— 写到没有该状态的类型上会直接报 metadata error。
+     */
+    function setExcludeStatuses(text) {
+      state.meegleConfig.excludeStatuses = String(text || '')
+        .split(/[，,]/)
+        .map(s => s.trim())
+        .filter(Boolean)
+    }
 
     function saveMeegleConfig() {
       try { localStorage.setItem(LS_MEEGLE_CONFIG, JSON.stringify(state.meegleConfig)) } catch {}
@@ -1174,6 +1193,7 @@ createApp({
           simpleName: cfg.simpleName,
           types,
           mqlTemplate: cfg.mqlTemplate || DEFAULT_MQL,
+          excludeStatuses: cfg.excludeStatuses || [],
           maxPerType: cfg.maxPerType || 200,
         }),
       })
@@ -1208,6 +1228,63 @@ createApp({
       for (const r of syncRows.value) if (r.isNew) next[r.workItemId] = true
       state.syncSelection = next
       toast(`已选中 ${Object.keys(next).length} 条新增需求`)
+    }
+
+    /**
+     * 按状态分组。
+     *
+     * 一次拉回来上百条混在一起，很难判断「这批要发哪些」。按状态切开后可以整组勾选：
+     * 比如只导「开发中 + 已提测」，把还在 UAT 的留到下一批。
+     */
+    // 按研发阶段从早到晚排列。匹配用「取最靠后的命中项」而不是第一个命中：
+    // 这样「生产测试验证」会归到「生产」而不是更早的「测试」，「UAT测试」也排在「测试中」之后。
+    // 顺序不完美的少数状态只会影响展示顺序，不影响任何判断，所以不去追求语义完美。
+    const STATUS_ORDER_HINTS = [
+      '未开始', '开始', '受理', '预研', '调研', 'prd', '设计',
+      '待需求评审', '评审', '待排期', '分配版本', '版本评审',
+      '待开发', '开发', '提测', '待测试', '测试', 'uat', '验收',
+      '待上线', '发版', '发布', '生产', '上线', '结束', '终止', '关闭', '挂起',
+    ]
+    function statusRank(status) {
+      const s = String(status || '').toLowerCase()
+      let rank = -1
+      for (let i = 0; i < STATUS_ORDER_HINTS.length; i++) {
+        if (s.includes(STATUS_ORDER_HINTS[i])) rank = i
+      }
+      return rank < 0 ? STATUS_ORDER_HINTS.length : rank
+    }
+
+    const syncGroups = computed(() => {
+      const byStatus = new Map()
+      for (const r of syncRows.value) {
+        const key = r.status || '（无状态）'
+        if (!byStatus.has(key)) byStatus.set(key, [])
+        byStatus.get(key).push(r)
+      }
+      return [...byStatus.entries()]
+        .map(([status, rows]) => ({
+          status,
+          rows,
+          total: rows.length,
+          newCount: rows.filter(r => r.isNew).length,
+          selected: rows.filter(r => state.syncSelection[r.workItemId]).length,
+        }))
+        .sort((a, b) => {
+          const d = statusRank(a.status) - statusRank(b.status)
+          return d !== 0 ? d : b.total - a.total
+        })
+    })
+
+    /** 整组勾选/取消 —— 分组的主要价值就在这里 */
+    function toggleGroup(group) {
+      const allSelected = group.newCount > 0 && group.selected >= group.newCount
+      const next = { ...state.syncSelection }
+      for (const r of group.rows) {
+        if (!r.isNew) continue
+        if (allSelected) delete next[r.workItemId]
+        else next[r.workItemId] = true
+      }
+      state.syncSelection = next
     }
 
     /** 导入选中项：只建新需求，已存在的默认不动（保护本地已人工调整过的数据） */
@@ -1269,6 +1346,9 @@ createApp({
       try {
         const cfg = JSON.parse(localStorage.getItem(LS_MEEGLE_CONFIG))
         if (cfg && typeof cfg === 'object') state.meegleConfig = { ...state.meegleConfig, ...cfg }
+        // 旧默认模板没有 {statusFilter} 占位符，直接用会让「排除已完成状态」静默失效，
+        // 所以只在「确认是旧的默认模板」时才升级，用户自定义过的模板不动
+        if (state.meegleConfig.mqlTemplate === LEGACY_MQL) state.meegleConfig.mqlTemplate = DEFAULT_MQL
       } catch {}
 
       checkDailyReminder()
@@ -1318,6 +1398,7 @@ createApp({
       // v2：飞书项目同步
       openSyncSettings, openSyncDialog, selectSpace, toggleType, saveSyncSettings, loadTypes,
       fetchMeegleItems, toggleSyncRow, selectAllNew, applySync, matchesOf, pickPrimaryMatches,
+      setExcludeStatuses,
       // Aliases for template
       searchQuery: computed({ get: () => state.searchQuery, set: v => { state.searchQuery = v.toLowerCase() } }),
       launchBranch: computed({ get: () => state.launchBranch, set: v => { state.launchBranch = v } }),
@@ -1360,6 +1441,8 @@ createApp({
       syncRaw: computed(() => state.syncRaw),
       syncSelection: computed(() => state.syncSelection),
       syncRows,
+      syncGroups,
+      toggleGroup,
       syncSelectedCount
     }
   }
