@@ -516,6 +516,14 @@
     </div>
     <div class="sync-body">
       <div v-if="syncSettings.error" class="sync-error">{{syncSettings.error}}</div>
+      <!-- 飞书能不能用只决定「同步飞书项目」可不可用，不影响「刷新分支索引」（那只读本地 git）；
+           写在这里，用户不必点完按钮才知道要装 CLI 或要登录 -->
+      <div class="sync-status" :class="{warn: meegleStatus.authenticated === false}">
+        <template v-if="meegleStatus.authenticated === null">飞书项目：正在检测登录状态…</template>
+        <template v-else-if="meegleStatus.authenticated">飞书项目：已登录（{{meegleStatus.host || '未知空间'}}）</template>
+        <template v-else-if="meegleStatus.error">飞书项目不可用：{{meegleStatus.error}}</template>
+        <template v-else>飞书项目：未登录 —— 在终端执行 <code>meegle auth login</code>（不带参数，按提示选择空间），完成后重开本窗口</template>
+      </div>
       <div class="sync-field">
         <label>空间</label>
         <select :value="meegleConfig.projectKey" @change="selectSpace($event.target.value)" class="sync-input" style="width:260px">

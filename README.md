@@ -14,11 +14,17 @@ node server.js          # 或双击 start-server.bat
 
 浏览器会自动打开。**端口被占用时会自动顺延**（并把实际端口写进 `.server-port`，页面会跟随），不需要手动改配置。
 
-首次使用飞书项目同步前，需要登录一次：
+首次使用飞书项目同步前，需要登录一次（**`auth login` 不带参数**，CLI 会列出空间让你选）：
 
 ```bash
-meegle auth login --host project.feishu.cn
+npm i -g @lark-project/meegle    # 没装过才需要
+meegle auth login
+meegle auth status               # 自检：authenticated 为 true 即可
 ```
+
+> 别写 `--host project.feishu.cn`：各版本 CLI 对 `--host` 的支持不一致，实测有的版本会把 host 当成命令，报 `unknown command "project" for "meegle"`。若仍报 `unknown command "..."`，先 `npm i -g @lark-project/meegle@latest` 升级再试。
+>
+> 只有「同步飞书项目」依赖飞书；「刷新分支索引」「未登记分支」读的是你本机的 git 提交记录，没登录飞书也能用。
 
 ## 更新到最新版本
 
@@ -94,7 +100,7 @@ backup/                          「备份」按钮写出的数据备份（.giti
 ```bash
 node server.js                                              # 另开一个终端
 cp scripts/.verify.local.example.json .verify.local.json    # 首次：按你的环境填写
-node scripts/ui-verify.mjs                                  # 真实浏览器跑 104 项断言
+node scripts/ui-verify.mjs                                  # 真实浏览器跑 112 项断言
 node scripts/v1-migrate-verify.mjs                          # v1→v2 迁移路径（老数据可见/老文件可导入）7 项断言
 ```
 
@@ -102,7 +108,7 @@ node scripts/v1-migrate-verify.mjs                          # v1→v2 迁移路�
 所以统一放在 `.verify.local.json`（已 gitignore）——仓库里只有 `scripts/.verify.local.example.json` 模板。
 缺配置时脚本会直接提示怎么建，不会跑一半失败。
 
-覆盖：页面渲染、端口跟随、分支索引、未登记分支处置与持久化、影响面提示、飞书同步（真实调用 CLI）、按需求ID去重、导出/导入往返、备份落盘与恢复往返、版本徽标与更新检查、引擎级安全回归（非法转义/目录穿越/跨域），以及 v1 主路径回归。
+覆盖：页面渲染、端口跟随、分支索引、未登记分支处置与持久化、影响面提示、飞书同步（真实调用 CLI）、按需求ID去重、导出/导入往返、备份落盘与恢复往返、版本徽标与更新检查、飞书不可用时的引导（未登录 / CLI 缺失）、引擎级安全回归（非法转义/目录穿越/跨域），以及 v1 主路径回归。
 
 > 脚本从本机既有自动化工程的 `node_modules` 里取 Playwright，不需要往本项目装依赖。
 

@@ -1374,6 +1374,8 @@ createApp({
       state.syncSettings.visible = true
       state.syncSettings.loading = true
       state.syncSettings.error = ''
+      // 不 await：登录状态只用于展示，不该拖住空间列表；状态到了模板会自己刷新
+      loadMeegleStatus()
       try {
         const res = await fetch(apiUrl('/api/meegle/spaces'))
         const data = await res.json()
@@ -1441,7 +1443,11 @@ createApp({
       }
       const st = await loadMeegleStatus()
       if (!st.authenticated) {
-        toast('未登录飞书项目，请在终端执行：meegle auth login --host ' + (st.host || 'project.feishu.cn'))
+        // 不写 --host：各版本 CLI 对参数的接受程度不一致，同事那一版会把 host 当成命令，
+        // 报 unknown command "project" for "meegle"。让 CLI 自己交互式选空间最稳。
+        toast(st.error
+          ? '飞书项目不可用：' + st.error
+          : '未登录飞书项目，请在终端执行 meegle auth login（不带参数，按提示选 ' + (st.host || 'project.feishu.cn') + '）')
         return
       }
       // 类型元数据必须先拿到：MQL 的表名用的是 typeKey，而除了 story 之外的

@@ -873,6 +873,71 @@ try {
       (await page.evaluate(() => window.__stayAlive)) === 1)
   }
 
+  // ===== 13) 飞书不可用时的引导 =====
+  // 同事真实踩到过：未登录时页面教的命令在他那版 CLI 上报 unknown command "project"。
+  // 造「未登录 / CLI 缺失」只能拦截接口，不能真去 logout —— 那会打断后面依赖真实登录的验证。
+  // 顺带钉住「刷新分支索引不依赖飞书」：问过不能拉飞书时是否该禁用它，答案是不该。
+  const stubMeegleStatus = body => page.route('**/api/meegle/status', r => r.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(body),
+  }))
+  const toastText = async () => ((await page.locator('.toast.show').textContent()) || '').trim()
+  const statusText = async () => ((await page.locator('.sync-status').textContent()) || '').trim()
+
+  await stubMeegleStatus({ authenticated: false, host: 'project.feishu.cn' })
+  await page.getByRole('button', { name: '同步设置' }).click()
+  await page.waitForTimeout(900)
+  check('同步设置窗口已打开（避免读到隐藏 DOM 造成假通过）',
+    await page.locator('.sync-status').isVisible())
+  const notLoggedText = await statusText()
+  check('未登录时同步设置里就说明原因与命令（不用点完才知道）',
+    notLoggedText.includes('未登录') && notLoggedText.includes('meegle auth login'), notLoggedText.slice(0, 80))
+  check('提示里的登录命令不带 --host（各版本 CLI 参数支持不一致）',
+    !notLoggedText.includes('--host'), notLoggedText.slice(0, 80))
+  await page.locator('.sync-box:not(.sync-box-wide) .sync-header .btn-close').click()
+  await page.waitForTimeout(200)
+
+  await page.getByRole('button', { name: '同步飞书项目' }).click()
+  await page.waitForTimeout(900)
+  const loginToast = await toastText()
+  check('未登录时点同步，给出的命令照做即成',
+    loginToast.includes('meegle auth login') && !loginToast.includes('--host'), loginToast.slice(0, 90))
+
+  // 飞书不可用时，只读本地 git 的分支索引必须照常能跑
+  const idxBefore = apiCalls.filter(u => u.includes('/api/git/branch-index')).length
+  await page.getByRole('button', { name: '刷新分支索引' }).click()
+  for (let i = 0; i < 40 && apiCalls.filter(u => u.includes('/api/git/branch-index')).length === idxBefore; i++) {
+    await page.waitForTimeout(250)
+  }
+  const idxAfter = apiCalls.filter(u => u.includes('/api/git/branch-index')).length
+  check('飞书不可用时「刷新分支索引」照常可用（只读本地 git，不依赖飞书）',
+    idxAfter > idxBefore, `分支索引请求 ${idxBefore} → ${idxAfter}`)
+
+  await stubMeegleStatus({
+    code: 'MEEGLE_CLI_MISSING',
+    error: '未找到 meegle CLI 入口脚本，请安装 @lark-project/meegle，或用环境变量 MEEGLE_JS 指向 bin/meegle.js',
+  })
+  await page.getByRole('button', { name: '同步设置' }).click()
+  await page.waitForTimeout(900)
+  const cliMissingText = await statusText()
+  check('CLI 缺失时说「不可用」并给出安装指引，而不是笼统说未登录',
+    cliMissingText.includes('不可用') && cliMissingText.includes('@lark-project/meegle'),
+    cliMissingText.slice(0, 90))
+  await page.locator('.sync-box:not(.sync-box-wide) .sync-header .btn-close').click()
+  await page.waitForTimeout(200)
+  await page.getByRole('button', { name: '同步飞书项目' }).click()
+  await page.waitForTimeout(900)
+  const cliToast = await toastText()
+  check('CLI 缺失时点同步提示的是装 CLI，不是让他去登录',
+    cliToast.includes('不可用') && cliToast.includes('@lark-project/meegle'), cliToast.slice(0, 90))
+
+  await page.unroute('**/api/meegle/status')
+  await page.getByRole('button', { name: '同步设置' }).click()
+  await page.waitForTimeout(1500)
+  const realStatusText = await statusText()
+  check('恢复真实接口后显示已登录', realStatusText.includes('已登录'), realStatusText.slice(0, 80))
+  await page.locator('.sync-box:not(.sync-box-wide) .sync-header .btn-close').click()
+  await page.waitForTimeout(200)
+
   // toDo.json 不存在时的 404 是 v1 既有正常分支（loadFromJsonFile 会静默回退 localStorage）；
   // favicon 缺失与功能无关。除这两者外出现 4xx/5xx 都算回归。
   const KNOWN_404 = /toDo\.json|favicon\.ico/i

@@ -1612,6 +1612,10 @@ input[data-role="syncProjectName"] {
   font-size: 12px; color: var(--danger); background: var(--danger-bg);
   border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 12px;
 }
+/* 同步设置里的飞书可用性状态：不能拉飞书时只影响「同步飞书项目」，
+   与「刷新分支索引」（只读本地 git）无关，所以在这里说清楚，别让人点完才知道 */
+.sync-status { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+.sync-status.warn { color: var(--warning); }
 .sync-summary { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 10px; font-size: 11px; color: var(--text-muted); }
 .sync-summary-err { color: var(--danger); }
 .sync-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }

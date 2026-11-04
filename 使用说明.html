@@ -292,7 +292,13 @@ kbd {
 
 <div class="note">
   <strong>前置条件：</strong>本地服务已启动，且已登录飞书项目。首次使用需在终端执行一次
-  <code>meegle auth login --host project.feishu.cn</code>（会弹出浏览器授权）。
+  <code>meegle auth login</code> —— <strong>不带参数</strong>，CLI 会列出空间让你选
+  （各版本对 <code>--host</code> 的支持不一致，带上可能报 <code>unknown command "project" for "meegle"</code>；
+  若仍报 <code>unknown command</code>，先 <code>npm i -g @lark-project/meegle@latest</code> 升级再试）；
+  完成后用 <code>meegle auth status</code> 自检，看到 <code>authenticated: true</code> 即可。
+  「同步设置」窗口顶部也会实时显示登录状态，未登录时直接照那里的提示做。
+  <br><br>
+  <strong>只有这个功能依赖飞书：</strong>「刷新分支索引」与「未登记分支」读的是你本机的 git 提交记录，没登录飞书也照常可用。
 </div>
 
 <div class="card">
