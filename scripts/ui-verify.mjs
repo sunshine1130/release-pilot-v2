@@ -259,6 +259,28 @@ try {
   })
   check('采用建议后落盘', persisted.includes('ops-web|feat/ops四需求合并分支'), persisted.join(' , '))
 
+  // 4c) 同一项目已经挂了别的分支时，建议必须**追加一行**而不是要求用户自己去切换：
+  //     一条需求的代码同时落在同仓库两条分支上是真实形态（融合分支 merge 了按需求命名的分支）
+  const row2 = page.locator('tr', { hasText: 'UI验证-老数据形态' })
+  const tagsBefore = await row2.locator('.branch-tag').count()
+  await row2.locator('.branch-suggest').first().click()
+  await page.waitForTimeout(400)
+  const tagsAfter = (await row2.locator('.branch-text').allTextContents()).map(s => s.trim())
+  check('已有分支时点建议是追加而不是让用户切换',
+    tagsBefore === 1 && tagsAfter.length === 2 && tagsAfter.includes('feat/ops四需求合并分支'),
+    `${tagsBefore} → ${tagsAfter.join(' + ')}`)
+  check('追加同时给出实际挂上的提示',
+    (await page.locator('.toast.show', { hasText: '已挂上 ops-web' }).count()) > 0)
+  const persisted2 = await page.evaluate(() => {
+    const items = JSON.parse(localStorage.getItem('todo_release_data') || '[]')
+    const it = items.find(i => i.name === 'UI验证-老数据形态')
+    return ((it && it.projects) || []).map(p => `${p.name}|${p.branch}`)
+  })
+  check('追加后两个分支都在（原分支没被覆盖）',
+    persisted2.includes('ops-web|feat/ops四需求合并分支') && persisted2.includes('ops-web|feat/7029460314销售预测迭代'),
+    persisted2.join(' , '))
+  await row2.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-suggest-append.png') })
+
   // 5) 处置：点「无需需求」后该分支卡片消失
   //    断言必须落在卡片本身：getByText 会同时匹配到外层容器，用文本计数会误判
   const cardOf = n => page.locator('.unreg-card', { hasText: n })

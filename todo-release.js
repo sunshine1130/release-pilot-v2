@@ -1148,13 +1148,19 @@ createApp({
         .filter(m => !assigned.includes(`${m.project}\u0000${m.branch}`))
     }
 
-    /** 点建议即把该分支挂到本需求：同一项目已填了分支时不覆盖，只提示去右键菜单换 */
+    /**
+     * 点建议即把该分支挂到本需求。
+     *
+     * 同一项目已经挂了别的分支时**追加一行**，不覆盖也不要求用户自己切换：
+     * 一条需求的代码同时落在同一仓库的两条分支上（融合分支 merge 了按需求命名的分支）
+     * 是真实存在的形态，两个分支都要留在清单里；覆盖等于把人工判断冲掉，
+     * 而提示「请自己换」等于让人多点两次还得先删掉旧行。
+     */
     function adoptSuggestion(item, s) {
       const list = item.projects || (item.projects = [])
-      const same = list.find(p => p.name === s.project)
-      if (!same) list.push({ name: s.project, branch: s.branch, notes: '' })
-      else if (!same.branch) same.branch = s.branch
-      else { toast(`${s.project} 下已有分支，请用右键菜单更换`); return }
+      const blank = list.find(p => p.name === s.project && !p.branch)
+      if (blank) blank.branch = s.branch
+      else list.push({ name: s.project, branch: s.branch, notes: '' })
       saveToLocalStorage()
       toast(`已挂上 ${s.project} · ${s.branch}`)
     }
