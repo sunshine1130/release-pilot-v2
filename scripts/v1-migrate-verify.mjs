@@ -111,8 +111,20 @@ fs.writeFileSync(tmpFile, JSON.stringify({
   branchesCache: {},
   launchBranch: 'master',
 }, null, 2))
+// 覆盖性导入会先在项目 backup/ 自动留底：核对内容后清掉，别把测试数据留在用户的备份目录里
+const BACKUP_DIR = path.join(PROJECT_DIR, 'backup')
+const listBackups = () => (fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).filter(n => n.endsWith('.json')) : [])
+const backupsBefore = listBackups()
 await page.setInputFiles('input[type=file][accept=".json"]', tmpFile)
 await page.waitForTimeout(1000)
+const autoBackup = listBackups().filter(n => !backupsBefore.includes(n))
+check('导入前自动备份了当前数据', autoBackup.length === 1, autoBackup.join(',') || '没有新增备份')
+if (autoBackup.length) {
+  const aj = JSON.parse(fs.readFileSync(path.join(BACKUP_DIR, autoBackup[0]), 'utf8'))
+  check('自动备份的内容是导入前的 v1 老数据',
+    Array.isArray(aj.items) && aj.items.some(i => i.name === 'V1遗留需求-甲'))
+  for (const f of autoBackup) fs.unlinkSync(path.join(BACKUP_DIR, f))
+}
 await expandAll(page)
 body = await page.innerText('body')
 check('v1 导出的 JSON 能被 v2 导入', body.includes('V1导出文件需求-丙'))

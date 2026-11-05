@@ -1083,6 +1083,15 @@ async function handleBackupCreate(req, res) {
     const full = path.join(BACKUP_DIR, name)
     const text = JSON.stringify(data, null, 2)
     fs.writeFileSync(full, text, 'utf8')
+    // 备份只增不减迟早塞满（每日提醒一天一份，一年三百多个）：文件名时间戳是定长的，
+    // 字典序即时间序，保留最新 BACKUP_KEEP 份，多余的顺手删掉
+    let pruned = 0
+    try {
+      const names = fs.readdirSync(BACKUP_DIR).filter(n => /\.json$/i.test(n)).sort()
+      for (const old of names.slice(0, Math.max(0, names.length - BACKUP_KEEP))) {
+        try { fs.unlinkSync(path.join(BACKUP_DIR, old)); pruned++ } catch {}
+      }
+    } catch {}
     json(res, {
       ok: true,
       dir: BACKUP_DIR,
@@ -1090,10 +1099,24 @@ async function handleBackupCreate(req, res) {
       file: full,
       size: Buffer.byteLength(text),
       items: data.items.length,
+      pruned,
       at: Date.now(),
     })
   } catch (err) {
     fail(res, 'BACKUP_WRITE_FAILED', `写备份失败：${err.message}`, 500)
+  }
+}
+
+/** 删除一份备份。复用 resolveBackupPath 的校验：只认备份目录下的单个 .json 文件名 */
+async function handleBackupDelete(req, res, query) {
+  const full = resolveBackupPath(query.get('name'))
+  if (!full) return fail(res, 'BAD_REQUEST', 'name 必须是备份目录下的 .json 文件名')
+  try {
+    if (!fs.existsSync(full)) return fail(res, 'BACKUP_NOT_FOUND', '备份文件不存在', 404)
+    fs.unlinkSync(full)
+    json(res, { ok: true, name: path.basename(full) })
+  } catch (err) {
+    fail(res, 'BACKUP_DELETE_FAILED', `删除备份失败：${err.message}`, 500)
   }
 }
 
@@ -1161,6 +1184,7 @@ const ROUTES = {
   'POST /api/backup': handleBackupCreate,
   'GET /api/backup/list': handleBackupList,
   'GET /api/backup/read': handleBackupRead,
+  'POST /api/backup/delete': handleBackupDelete,
   'POST /api/backup/reveal': handleBackupReveal,
   'GET /api/version': handleVersion,
   'GET /api/update/check': handleUpdateCheck,

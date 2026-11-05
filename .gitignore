@@ -43,6 +43,11 @@ backup/
 
 # v2: 验证截图里有真实需求名称与需求ID，只留本地
 docs/ui-verify*.png
+# UI 走查用的现状/对比截图，同样只留本地
+docs/ui-now-*.png
+docs/ui-*.png
+# 布局方案 Demo（用真实需求名举例，只给本地看效果，不进公开仓库）
+docs/demo-*.html
 
 # v2: 验证脚本的临时输出
 .verify.out

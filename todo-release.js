@@ -41,6 +41,10 @@ const LS_BRANCH_LINKS = 'todo_branch_links'
 const LS_BRANCH_TRIAGE = 'todo_branch_triage'
 const LS_MEEGLE_CONFIG = 'todo_meegle_config'
 const LS_INDEX_CONFIG = 'todo_index_config'
+// 卡片区的浏览状态（折叠 / 分组开合）。刻意不导出：这是本机的浏览偏好，不是需求数据
+const LS_COLLAPSED = 'todo_collapsed_items'
+const LS_EXPANDED_RELEASED = 'todo_expanded_released'
+const LS_SECTION_EXPANDED = 'todo_section_expanded'
 /** 索引 TTL：分支一直在长，实测同一条分支两天内需求覆盖就会变，不能无限期复用 */
 const INDEX_TTL_MS = 10 * 60 * 1000
 
@@ -77,6 +81,13 @@ createApp({
       projDropdown: { visible: false, x: 0, y: 0, w: 0, filtered: [], target: null, field: '' },
       sectionExpanded: { pending: true, releasing: false, released: false },
 
+      // ↓↓↓ v2 新增：卡片区的浏览状态（折叠 / 排序）↓↓↓
+      // 折叠两个集合各存「例外」：待发版/发版中记「手动折叠的」，已发版记「手动展开的」，
+      // 这样新出现的已发版需求不用逐条初始化就是折叠的。
+      collapsedItems: new Set(),
+      expandedReleased: new Set(),
+      sortMode: false,          // 排序模式：只有待发版用，进去才出现拖拽手柄
+
       // ↓↓↓ v2 新增：分支索引 / 人工关联记忆 / 未登记分支处置 ↓↓↓
       // branchIndex[项目名] = { base, branches:{ 分支名:{ids,commits,lastDate,merged,skipped} }, unregistered:[分支名], timestamp }
       branchIndex: {},
@@ -106,7 +117,8 @@ createApp({
       appVersion: { commit: '', date: '', subject: '', branch: '', remote: '', dirty: false },
       updateBusy: false,
       // 备份到项目 backup/ 目录：列表、恢复与目录路径都由引擎给
-      backupDialog: { visible: false, loading: false, error: '', dir: '', files: [], pendingRestore: '' },
+      backupDialog: { visible: false, loading: false, error: '', dir: '', files: [], pendingRestore: '', pendingDelete: '' },
+      triagedDialog: { visible: false, project: '', entries: [] },
       syncDialog: { visible: false, loading: false, error: '', perType: [], errors: [], keyword: '', onlyUnregistered: false },
       syncRaw: [],
       syncSelection: {},
@@ -178,11 +190,6 @@ createApp({
     function truncateBranch(name, maxLen = 40) {
       if (!name || name.length <= maxLen) return name
       return name.substring(0, maxLen) + '...'
-    }
-
-    function truncateUrl(url) {
-      if (!url) return ''
-      return url.length > 32 ? url.substring(0, 32) + '...' : url
     }
 
     function getProjectInfo(name) { return state.projectNames.find(p => p.name === name) }
@@ -317,7 +324,8 @@ createApp({
       state.toastMsg = msg
       state.toastShow = true
       clearTimeout(toastTimer)
-      toastTimer = setTimeout(() => { state.toastShow = false }, 1600)
+      // 时长跟着文案长度走：1.6s 只能读完十几个字，长提示（如排序退出说明）一闪而过等于没提示
+      toastTimer = setTimeout(() => { state.toastShow = false }, Math.min(1600 + String(msg).length * 60, 5000))
     }
 
     // ===== Copy =====
@@ -386,8 +394,8 @@ createApp({
     // 「导出」走浏览器下载，得自己挑目录、事后也想不起来存哪了；
     // 备份固定写到项目下的 backup/，路径由引擎给出，换机器拷走整个文件夹即可。
 
-    /** 立刻备份一份到项目目录，返回引擎回执（含绝对路径） */
-    async function backupToProject() {
+    /** 立刻备份一份到项目目录，返回引擎回执（含绝对路径）。quiet 用于覆盖性操作前的自动留底：不弹 toast 打扰 */
+    async function backupToProject(quiet) {
       try {
         const res = await fetch(apiUrl('/api/backup'), {
           method: 'POST',
@@ -397,10 +405,10 @@ createApp({
         const data = await res.json()
         if (data.code) throw new Error(data.error || data.code)
         state.backupDialog.dir = data.dir
-        toast(`已备份 ${data.items} 条到 ${data.name}`)
+        if (!quiet) toast(`已备份 ${data.items} 条到 ${data.name}`)
         return data
       } catch (e) {
-        toast(`备份失败：${e.message}（引擎没起或端口不对？）`)
+        if (!quiet) toast(`备份失败：${e.message}（引擎没起或端口不对？）`)
         return null
       }
     }
@@ -423,7 +431,27 @@ createApp({
     function openBackupDialog() {
       state.backupDialog.visible = true
       state.backupDialog.pendingRestore = ''
+      state.backupDialog.pendingDelete = ''
       loadBackups()
+    }
+
+    /** 删除备份文件：和恢复一样是不可逆动作，所以也点两次确认 */
+    async function deleteBackup(file) {
+      if (state.backupDialog.pendingDelete !== file.name) {
+        state.backupDialog.pendingDelete = file.name
+        toast(`再点一次「确认删除」会把 ${file.name} 从磁盘删掉`)
+        return
+      }
+      state.backupDialog.pendingDelete = ''
+      try {
+        const res = await fetch(apiUrl('/api/backup/delete?name=' + encodeURIComponent(file.name)), { method: 'POST' })
+        const data = await res.json()
+        if (data.code) throw new Error(data.error || data.code)
+        toast(`已删除 ${data.name}`)
+        await loadBackups()
+      } catch (e) {
+        toast(`删除失败：${e.message}`)
+      }
     }
 
     /** 恢复是一次覆盖性写入，所以要点两次：第一次只是把该行变成「确认恢复」 */
@@ -434,6 +462,8 @@ createApp({
         return
       }
       state.backupDialog.pendingRestore = ''
+      // 覆盖前先静默留底：恢复错了（选错那份）能靠这份自动备份回到恢复前
+      const safety = await backupToProject(true)
       try {
         const res = await fetch(apiUrl('/api/backup/read?name=' + encodeURIComponent(file.name)))
         const data = await res.json()
@@ -447,7 +477,7 @@ createApp({
         state.addingCounter = 0
         state.editProjectIdx = -1
         state.backupDialog.visible = false
-        toast(`已从 ${file.name} 恢复 ${state.items.length} 条需求`)
+        toast(`已从 ${file.name} 恢复 ${state.items.length} 条需求` + (safety ? '（恢复前数据已自动备份）' : ''))
       } catch (e) {
         toast(`恢复失败：${e.message}`)
       }
@@ -483,9 +513,11 @@ createApp({
       const file = e.target.files[0]
       if (!file) return
       const reader = new FileReader()
-      reader.onload = () => {
+      reader.onload = async () => {
         try {
           const data = JSON.parse(reader.result)
+          // 覆盖前先静默留底：导入没有二次确认，选错文件时全靠这份自动备份找回（引擎没起就算了，别挡导入）
+          const safety = await backupToProject(true)
           setFullData(data)
           saveToLocalStorage()
           saveLaunchBranch()
@@ -494,7 +526,7 @@ createApp({
           state.addingItems = []
           state.addingCounter = 0
           state.editProjectIdx = -1
-          toast('已导入 ' + state.items.length + ' 条需求')
+          toast('已导入 ' + state.items.length + ' 条需求' + (safety ? '（导入前数据已自动备份）' : ''))
         } catch (err) { toast('导入失败：JSON 格式错误') }
       }
       reader.readAsText(file)
@@ -976,6 +1008,8 @@ createApp({
         if (state.allBranchesModal.visible) state.allBranchesModal.visible = false
         if (state.syncDialog.visible) state.syncDialog.visible = false
         if (state.syncSettings.visible) state.syncSettings.visible = false
+        if (state.backupDialog.visible) state.backupDialog.visible = false
+        if (state.triagedDialog.visible) state.triagedDialog.visible = false
         if (state.searchQuery) state.searchQuery = ''
       }
     }
@@ -1185,6 +1219,64 @@ createApp({
       saveBranchTriage()
       toast('已恢复提示')
     }
+
+    /**
+     * 已处置分支：按项目汇总 + 详情弹窗。
+     *
+     * 为什么改成按项目聚合：原来是一长串「分支（已忽略）恢复 分支（已忽略）恢复…」，
+     * 既看不出哪个项目积压得多，也没法一条条看。详情里按**最后提交时间倒序**（新的在前），
+     * 并且**最后提交超过半年的直接不列**——那些分支已经不构成发版风险，留着只会占视线。
+     */
+    const TRIAGE_STALE_DAYS = 183
+    function triageCutoff() {
+      const d = new Date(Date.now() - TRIAGE_STALE_DAYS * 24 * 3600 * 1000)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+
+    const triagedProjects = computed(() => {
+      const cutoff = triageCutoff()
+      const map = new Map()
+      for (const [key, rec] of Object.entries(state.branchTriage)) {
+        const parts = key.split('\u0000')
+        const project = parts[0]
+        const branch = parts[1] || key
+        // 没配本地路径的项目取不到分支信息（也就没有日期）——这种保守留着，别把记录藏没了
+        const info = ((state.branchIndex[project] || {}).branches || {})[branch] || {}
+        const lastDate = info.lastDate || ''
+        if (lastDate && lastDate < cutoff) continue
+        if (!matchUnregKeyword(branch, [project])) continue
+        const g = map.get(project) || { project, entries: [], exempt: 0, ignored: 0 }
+        if (rec.action === 'exempt') g.exempt += 1; else g.ignored += 1
+        // 索引里没有这条时提交数是「未知」而不是 0：报个假数字会让人以为分支没内容
+        g.entries.push({ key, project, branch, action: rec.action, lastDate, commits: info.commits ?? null })
+        map.set(project, g)
+      }
+      const list = [...map.values()]
+      list.forEach(g => g.entries.sort((a, b) => String(b.lastDate).localeCompare(String(a.lastDate))))
+      return list.sort((a, b) => b.entries.length - a.entries.length || a.project.localeCompare(b.project))
+    })
+
+    function openTriagedDetail(group) {
+      state.triagedDialog = { visible: true, project: group.project, entries: group.entries.slice() }
+    }
+
+    /** 详情弹窗里单条恢复：恢复后它会回到「未登记分支」重新参与判断 */
+    function restoreOneTriage(entry) {
+      delete state.branchTriage[entry.key]
+      saveBranchTriage()
+      state.triagedDialog.entries = state.triagedDialog.entries.filter(e => e.key !== entry.key)
+      toast(`已恢复：${entry.branch}`)
+      if (!state.triagedDialog.entries.length) state.triagedDialog.visible = false
+    }
+
+    /** 卡片上「涉及面」的标注口径：本需求的项目分支 + 一同发版分支，超过 3 个算广 */
+    const WIDE_ITEM_THRESHOLD = 3
+    function branchTotal(item) {
+      return ((item.projects || []).length) + ((item.syncBranches || []).length)
+    }
+    const isWideItem = (item) => branchTotal(item) > WIDE_ITEM_THRESHOLD
+    const wideItemTitle = (item) =>
+      `涉及 ${branchTotal(item)} 个项目分支（含发版 ${(item.projects || []).length} / 同发 ${(item.syncBranches || []).length}）——改动面较广，发版前先确认影响面`
 
     /** 已处置的分支（折叠区展示 + 可恢复） */
     const triagedGroups = computed(() => {
@@ -1711,6 +1803,10 @@ createApp({
         state.launchBranch = localStorage.getItem('todo_launch_branch') || ''
       }
 
+      // 卡片区的浏览状态（折叠 / 分组开合）要早点读：晚于首帧渲染会出现"先展开再折起"的闪动
+      loadCardUiState()
+      bindImpactPop()
+
       checkDailyReminder()
       autoFetchBranches()
       loadAppVersion()
@@ -1730,6 +1826,222 @@ createApp({
 
     function toggleSection(key) {
       state.sectionExpanded[key] = !state.sectionExpanded[key]
+      saveSectionExpanded()
+    }
+
+    // ===== v2: 需求卡片的折叠 / 排序 / 影响面气泡 =====
+    //
+    // 为什么折叠状态要分「折叠集合」和「已发版展开集合」两个：折叠的默认值按状态不同
+    // （待发版/发版中默认展开、已发版默认折叠），只存"例外"就不用给新数据做初始化。
+    // 这三个键都刻意不进导出文件：它们是本机的浏览偏好，不是需求数据本身。
+
+    const itemKey = (item) => item.id
+    /** 当前正在拖的卡片 id。刻意用闭包变量而不是 state：拖动过程中改响应式状态会触发重渲染，
+     *  正在拖的 DOM 节点被换掉后浏览器会取消拖拽（实测过）。 */
+    let dragId = null
+    /** 拖拽时锁定的落点（拖拽过程只写这两个闭包变量 + class，不碰响应式状态） */
+    let dropKey = null
+    let dropAfter = false
+    /** 「待发版」这一个分组里既有 pending 也有 new，排序要按分组口径走，不能只认 pending */
+    const inPendingGroup = (it) => it.status === 'pending' || it.status === 'new'
+    /** 一个分组包含哪些需求：待发版里同时装着 new 和 pending（和 sections 的口径一致） */
+    const itemsOfSection = (key) => state.items.filter(i => (key === 'pending' ? (i.status === 'pending' || i.status === 'new') : i.status === key))
+
+    function isItemCollapsed(item) {
+      // 搜索时强制展开：搜到了却看不见内容，比"记住折叠"更让人困惑
+      if (state.searchQuery) return false
+      return item.status === 'released' ? !state.expandedReleased.has(item.id) : state.collapsedItems.has(item.id)
+    }
+
+    function toggleItemCollapse(item) {
+      if (item.status === 'released') {
+        state.expandedReleased.has(item.id) ? state.expandedReleased.delete(item.id) : state.expandedReleased.add(item.id)
+      } else {
+        state.collapsedItems.has(item.id) ? state.collapsedItems.delete(item.id) : state.collapsedItems.add(item.id)
+      }
+      saveCollapsed()
+    }
+
+    function expandSectionCards(key) {
+      itemsOfSection(key).forEach(i => {
+        if (i.status === 'released') state.expandedReleased.add(i.id); else state.collapsedItems.delete(i.id)
+      })
+      // 展开卡片时顺带把分组打开：已发版默认是收起的，只展开卡片等于什么都没看见
+      state.sectionExpanded[key] = true
+      saveCollapsed(); saveSectionExpanded()
+    }
+
+    function collapseSectionCards(key) {
+      itemsOfSection(key).forEach(i => {
+        if (i.status === 'released') state.expandedReleased.delete(i.id); else state.collapsedItems.add(i.id)
+      })
+      saveCollapsed()
+    }
+
+    /** 卡片头的摘要：这条需求挂了几个分支、有没有一同发版 */
+    function branchCountLabel(item) {
+      const n = (item.projects || []).length
+      const m = (item.syncBranches || []).length
+      if (!n) return '未关联分支'
+      return `${n} 分支` + (m ? ` · 同发 ${m}` : '')
+    }
+
+    /** 排序模式：只针对待发版。进去先把卡片折起来，一屏能看更多、拖动目标也更好判断 */
+    function toggleSortMode() {
+      state.sortMode = !state.sortMode
+      if (state.sortMode) {
+        // 折的是"整个分组"（pending + new），和手柄的渲染口径一致，
+        // 否则 new 的卡片会既带手柄又折不起来、拖了还没反应
+        itemsOfSection('pending').forEach(i => state.collapsedItems.add(i.id))
+        saveCollapsed()
+        toast('已进入排序模式：卡片已折起，拖动 ⠿ 手柄调整顺序，调完点「完成排序」')
+      } else {
+        toast('已退出排序模式（顺序已保存）。卡片保持折起，想展开点分组旁的「卡片展开」')
+      }
+    }
+
+    function onDragStart(e, item) {
+      if (!state.sortMode || !inPendingGroup(item)) return
+      dragId = item.id
+      const card = e.currentTarget && e.currentTarget.closest('.req-card')
+      if (card) card.classList.add('dragging')
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', item.id)   // Firefox 需要有数据才真的开始拖
+    }
+
+    /** 指针附近最近的一张卡片。
+     *  为什么要在「容器」上接收拖拽而不是在每张卡片上：两列排布时卡片之间有缝，
+     *  松手落在缝里、或落在列表下方空白处，卡片级的 drop 就没有接收者，整次拖拽被丢弃
+     *  （用户实测"拖了没效果"就是这个）。这里按「点到矩形的距离」吸附最近的一张。 */
+    function nearestCard(gridEl, x, y) {
+      let best = null, bestD = Infinity
+      for (const el of gridEl.querySelectorAll('.req-card')) {
+        const r = el.getBoundingClientRect()
+        const dx = Math.max(r.left - x, 0, x - r.right)
+        const dy = Math.max(r.top - y, 0, y - r.bottom)
+        const d = dx * dx + dy * dy
+        if (d < bestD) { bestD = d; best = el }
+      }
+      return best
+    }
+
+    function clearDropIndicator() {
+      document.querySelectorAll('.req-card.drop-before, .req-card.drop-after').forEach(el => el.classList.remove('drop-before', 'drop-after'))
+    }
+
+    function onGridDragOver(e) {
+      if (!dragId) return
+      const from = state.items.find(i => i.id === dragId)
+      // 只在「待发版」这个分组内排序：跨分组不接受（改状态请用状态按钮，拖拽不兼职干这个）
+      if (!from || !inPendingGroup(from)) return
+      // 只动 class、不碰响应式状态：一旦在这里改 state，Vue 会重渲染列表并换掉正在拖的节点，
+      // 浏览器随即取消这次拖拽（实测过）
+      clearDropIndicator()
+      dropKey = null
+      const card = nearestCard(e.currentTarget, e.clientX, e.clientY)
+      if (!card) return
+      const target = state.items.find(i => i.id === card.dataset.key)
+      if (!target || target.id === dragId || !inPendingGroup(target)) return
+      e.preventDefault()   // 必须：不 preventDefault，浏览器不允许 drop（缝隙上尤其明显）
+      const r = card.getBoundingClientRect()
+      dropAfter = e.clientY >= r.top + r.height / 2
+      dropKey = target.id
+      card.classList.add(dropAfter ? 'drop-after' : 'drop-before')
+    }
+
+    function onGridDrop(e) {
+      const fromId = dragId
+      dragId = null
+      clearDropIndicator()
+      if (!fromId || !dropKey) return
+      const from = state.items.find(i => i.id === fromId)
+      const target = state.items.find(i => i.id === dropKey)
+      dropKey = null
+      if (!from || !target || from === target || !inPendingGroup(from) || !inPendingGroup(target)) return
+      e.preventDefault()
+      const fromIdx = state.items.indexOf(from)
+      const [moved] = state.items.splice(fromIdx, 1)
+      // 重新取一次目标下标：上面 splice 之后原下标可能已经移动
+      let toIdx = state.items.indexOf(target)
+      if (dropAfter) toIdx += 1
+      state.items.splice(toIdx, 0, moved)
+      saveToLocalStorage()   // 顺序就是 items 的数组顺序，存下来自然就记住了
+      toast(`已调整顺序：${moved.name.slice(0, 14)}`)
+    }
+
+    function onDragEnd() {
+      dragId = null
+      dropKey = null
+      clearDropIndicator()
+      document.querySelectorAll('.req-card.dragging').forEach(el => el.classList.remove('dragging'))
+    }
+
+    /** 影响面：把这条分支覆盖的**别的**需求解析成「需求名 + 飞书链接」 */
+    function impactList(item, p) {
+      return impactIds(item, p).map(id => {
+        const it = state.items.find(x => selfWorkItemId(x) === id)
+        return { id, name: it ? it.name : '（未登记名称）', link: (it && it.link) || '' }
+      })
+    }
+
+    let impactTimer = null
+    function showImpactPop(e, item, p) {
+      clearTimeout(impactTimer)
+      const list = impactList(item, p)
+      if (!list.length) return
+      const projectName = p.name || p.project || ''
+      const branch = p.branch || ''
+      const idx = (state.branchIndex[projectName] || {}).branches || {}
+      const meta = idx[branch]
+      const pop = document.getElementById('impactPop')
+      pop.innerHTML =
+        (branch ? `<div class="p-head">${escHtml(branch)}</div>` : '')
+        + (meta && meta.commits ? `<div class="p-meta">${meta.commits} 个独占提交${meta.lastDate ? ' · 最近提交 ' + meta.lastDate : ''}</div>` : '')
+        + `<div class="p-sep"></div><div class="p-title">这条分支还覆盖 ${list.length} 个需求（点一行打开飞书详情）</div>`
+        + list.map(r => r.link
+          ? `<a class="p-item" href="${escHtml(r.link)}" target="_blank"><span class="pid">${r.id}</span><span class="ptitle">${escHtml(r.name)}</span><span class="parrow">↗</span></a>`
+          : `<div class="p-item"><span class="pid">${r.id}</span><span class="ptitle">${escHtml(r.name)}</span></div>`).join('')
+        + `<div class="p-foot">看的是提交记录里的需求ID（反查），所以能覆盖到"分支名里没写需求"的情况</div>`
+      pop.style.display = 'block'
+      pop.style.visibility = 'hidden'
+      const r = e.currentTarget.getBoundingClientRect()
+      const pr = pop.getBoundingClientRect()
+      let top = r.top - pr.height - 10
+      if (top < 8) top = Math.min(r.bottom + 10, window.innerHeight - pr.height - 8)
+      pop.style.top = Math.max(8, top) + 'px'
+      pop.style.left = Math.min(Math.max(8, r.left - 8), window.innerWidth - pr.width - 8) + 'px'
+      pop.style.visibility = 'visible'
+    }
+
+    function hideImpactPop() {
+      clearTimeout(impactTimer)
+      // 给 180ms 让鼠标移进气泡里（里面的需求ID要能点）
+      impactTimer = setTimeout(() => { const pop = document.getElementById('impactPop'); if (pop) pop.style.display = 'none' }, 180)
+    }
+
+    function bindImpactPop() {
+      const pop = document.getElementById('impactPop')
+      if (!pop) return
+      pop.addEventListener('mouseenter', () => clearTimeout(impactTimer))
+      pop.addEventListener('mouseleave', hideImpactPop)
+    }
+
+    function saveCollapsed() {
+      localStorage.setItem(LS_COLLAPSED, JSON.stringify([...state.collapsedItems]))
+      localStorage.setItem(LS_EXPANDED_RELEASED, JSON.stringify([...state.expandedReleased]))
+    }
+
+    function saveSectionExpanded() {
+      localStorage.setItem(LS_SECTION_EXPANDED, JSON.stringify(state.sectionExpanded))
+    }
+
+    function loadCardUiState() {
+      try { state.collapsedItems = new Set(JSON.parse(localStorage.getItem(LS_COLLAPSED)) || []) } catch { state.collapsedItems = new Set() }
+      try { state.expandedReleased = new Set(JSON.parse(localStorage.getItem(LS_EXPANDED_RELEASED)) || []) } catch { state.expandedReleased = new Set() }
+      try {
+        const se = JSON.parse(localStorage.getItem(LS_SECTION_EXPANDED))
+        if (se && typeof se === 'object') state.sectionExpanded = { ...state.sectionExpanded, ...se }
+      } catch {}
     }
 
     function openMrUrl(url) {
@@ -1740,11 +2052,11 @@ createApp({
     return {
       state,
       sections, releasingProjects, filteredBranchList,
-      escHtml, truncateBranch, truncateUrl, getProjectInfo, getColorIdx,
+      escHtml, truncateBranch, selfWorkItemId, getProjectInfo, getColorIdx,
       buildMrUrl, buildBranchUrl, formatReleaseTime, newId,
       statusLabel, statusClass,
       copyText, exportToFile, importFromFile,
-      backupToProject, openBackupDialog, loadBackups, restoreBackup, revealBackupDir,
+      backupToProject, openBackupDialog, loadBackups, restoreBackup, deleteBackup, revealBackupDir,
       addProject, removeProject, saveProjectEdit,
       startAdding, saveAdding, startEdit, saveEdit, cancelEdit,
       changeStatus, releaseItem, confirmLaunch, releaseAllToDone,
@@ -1758,12 +2070,18 @@ createApp({
       // v2：分支索引与关联
       refreshBranchIndex, branchOtherIds, impactIds, triageBranchGroup, restoreBranchTriage, deriveRepoUrl,
       setOnlyMine, autoSuggestions, adoptSuggestion,
+      // v2：需求卡片的折叠 / 排序 / 影响面气泡
+      itemKey, isItemCollapsed, toggleItemCollapse, expandSectionCards, collapseSectionCards,
+      branchCountLabel, toggleSortMode,
+      onDragStart, onGridDragOver, onGridDrop, onDragEnd,
+      showImpactPop, hideImpactPop,
       // v2：飞书项目同步
       openSyncSettings, openSyncDialog, selectSpace, toggleType, saveSyncSettings, loadTypes,
       fetchMeegleItems, toggleSyncRow, selectAllNew, applySync, matchesOf, pickPrimaryMatches,
       setExcludeStatuses,
       // Aliases for template
       searchQuery: computed({ get: () => state.searchQuery, set: v => { state.searchQuery = v.toLowerCase() } }),
+      sortMode: computed(() => state.sortMode),
       launchBranch: computed({ get: () => state.launchBranch, set: v => { state.launchBranch = v } }),
       items: computed(() => state.items),
       projectNames: computed(() => state.projectNames),
@@ -1791,6 +2109,13 @@ createApp({
       // v2 别名
       unregisteredGroups,
       triagedGroups,
+      triagedProjects,
+      openTriagedDetail,
+      restoreOneTriage,
+      triagedDialog: computed(() => state.triagedDialog),
+      isWideItem,
+      wideItemTitle,
+      branchTotal,
       filteredUnregGroups,
       filteredTriagedGroups,
       branchIndex: computed(() => state.branchIndex),

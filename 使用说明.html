@@ -193,6 +193,8 @@ kbd {
   <p style="margin-top:10px">v2 新增的本地键：<code>todo_branch_index</code>（分支索引，可重算，<strong>不导出</strong>）、
   <code>todo_branch_triage</code>（未登记分支的处置）、<code>todo_branch_links</code>（手工关联）、
   <code>todo_meegle_config</code>（同步设置）。后三个会随导出文件一起备份。</p>
+  <p>卡片的<strong>折叠状态、待发版的排序、分组的展开收起</strong>同样只存在本机浏览器，刷新后保持，
+  但<strong>不导出、也不随备份文件走</strong> —— 它们是「怎么看」的浏览状态，不是需求数据。</p>
 </div>
 
 <!-- ===== 从 v1 升级 ===== -->
@@ -247,6 +249,78 @@ kbd {
 <h2>三、需求管理</h2>
 
 <div class="card">
+  <h3>需求以卡片展示</h3>
+  <p>需求区已从表格改为<strong>卡片</strong>：一条需求一张卡片，按状态分组排列
+  （<span class="tag tag-new">新建</span> / <span class="tag tag-pending">待发版</span> /
+  <span class="tag tag-releasing">发版中</span> / <span class="tag tag-released">已发版</span>）。</p>
+  <p><strong>卡片头</strong>一行是这条需求的摘要与操作：</p>
+  <table class="table-demo">
+    <tr><th style="width:170px">元素</th><th>说明</th></tr>
+    <tr><td>需求名称</td><td>卡片的标题</td></tr>
+    <tr><td>需求ID</td><td>等宽字体显示，<strong>点一下打开飞书需求详情</strong>；没有需求ID的需求不显示这一项</td></tr>
+    <tr><td>分支数摘要</td><td>如 <code>4 分支 · 同发 2</code>；一条分支都没挂时显示 <code>未关联分支</code></td></tr>
+    <tr><td>发版时间</td><td>已发版的需求会带上发版时间（如 <code>发版时间 2026-10-28</code>）</td></tr>
+    <tr><td>操作按钮</td><td>按当前状态给出能做的动作：待发版是「编辑 / 发版 / 回退新建 / 删」，发版中是「标记已发版 / 恢复待发版 / 删」，已发版是「恢复待发版 / 删」</td></tr>
+  </table>
+  <p><strong>卡片体</strong>按「项目 → 分支 → 影响面 → 备注」逐行排列，一条分支占一行：</p>
+  <ul>
+    <li><strong>项目</strong>：彩色标签，同一个项目在整页里用同一种颜色。</li>
+    <li><strong>分支</strong>：等宽字体，<strong>点一下 = 复制分支名 + 打开 GitLab 的「新建 MR」页</strong>
+      （来源分支与目标分支已经预填好，但仍要你自己在 GitLab 那边点提交，见第六节）。</li>
+    <li><strong>影响面</strong>：<code>+1</code> / <code>+3</code> 形式的徽标，鼠标悬浮弹出气泡（见第五节「影响面提示」）。</li>
+    <li><strong>备注</strong>：📝 按钮，有备注时高亮。</li>
+  </ul>
+  <p>「一同发版」的分支单独一行，带<strong>「同发」</strong>标签、也用另一种底色，与需求自己的分支区分开。
+  还没挂任何分支的卡片会直接给出提示：点「编辑」补上，或用「自动匹配」把索引里查到的分支挂上来。</p>
+</div>
+
+<div class="card">
+  <h3>折叠：单条卡片与整组</h3>
+  <ul>
+    <li><strong>单条折叠</strong>：点卡片左侧的箭头即可折起 / 展开。折起后只剩卡片头那一行摘要
+      （名称、需求ID、分支数、操作按钮），要看细节点开就行。</li>
+    <li><strong>整组折叠</strong>：每个分组标题旁都有 <strong>「卡片展开」/「卡片折叠」</strong> 两个按钮，
+      它们<strong>只作用于本组</strong>，不影响其他分组。点分组标题本身则是收起 / 展开这一整组
+      （<strong>已发版分组默认是收起的</strong>）。</li>
+    <li><strong>已发版的卡片默认就是折叠的</strong>（历史需求通常只看个名字），待发版与发版中的卡片默认展开。
+      点「卡片展开」时会顺带把该分组一起打开。</li>
+    <li><strong>搜索时会自动展开所有卡片</strong>：否则搜到了却看不见内容。清空搜索后回到你原来折叠 / 展开的样子。</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>排序（仅「待发版」）</h3>
+  <p>只有 <span class="tag tag-pending">待发版</span> 分组的标题旁有 <strong>「排序」</strong> 按钮
+  —— 发版顺序是一件要安排的事，发版中 / 已发版不需要重排：</p>
+  <ol>
+    <li>点「排序」进入排序模式：卡片会<strong>自动折起</strong>（一屏能看更多、目标位置也更好判断），
+      同时卡片左侧出现 <code>⠿</code> <strong>拖拽手柄</strong>。</li>
+    <li>拖动 <code>⠿</code> 手柄把卡片拖到想要的位置，松手即生效。</li>
+    <li>点 <strong>「完成排序」</strong> 退出排序模式（按 <kbd>Escape</kbd> 也可以）。</li>
+  </ol>
+  <ul>
+    <li><strong>顺序会自动保存</strong>，刷新页面后保持。退出排序模式不会自动展开卡片，想看细节就点分组旁的「卡片展开」。</li>
+    <li><strong>不能跨分组拖</strong>：拖到别的分组不会生效。要改状态请用卡片上的状态按钮
+      （「发版」「标记已发版」「恢复待发版」）。</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>卡片的状态区分</h3>
+  <p>卡片靠<strong>左侧色条 + 一层很淡的底色</strong>区分状态，扫一眼就能分开，
+  底色浅到不影响分支名的可读性：</p>
+  <table class="table-demo">
+    <tr><th style="width:150px">状态</th><th>色条 / 底色</th></tr>
+    <tr><td><span class="tag tag-new">新建</span></td><td>蓝色</td></tr>
+    <tr><td><span class="tag tag-pending">待发版</span></td><td>橙色</td></tr>
+    <tr><td><span class="tag tag-releasing">发版中</span></td><td>紫色</td></tr>
+    <tr><td><span class="tag tag-released">已发版</span></td><td>绿色</td></tr>
+  </table>
+  <p class="note"><strong>折叠、排序、分组的展开收起都只存在本机浏览器里</strong>（localStorage），刷新后保持，
+  但<strong>不跟着导出 / 备份文件走</strong> —— 换机器、换浏览器后回到默认状态，需要自己再折一遍。</p>
+</div>
+
+<div class="card">
   <h3>需求状态流转</h3>
   <p>每条需求有 4 种状态，按以下流程流转：</p>
   <p style="text-align:center;font-size:15px;margin:12px 0">
@@ -266,7 +340,7 @@ kbd {
 <div class="card">
   <h3>新增/编辑需求</h3>
   <ol>
-    <li>点击 <strong>"+ 新增需求"</strong> 按钮，在表格顶部出现编辑行。</li>
+    <li>点击 <strong>"+ 新增需求"</strong> 按钮，在需求列表顶部出现编辑行。</li>
     <li>填写<strong>需求名称</strong>（必填）和<strong>需求链接</strong>（可选）。</li>
     <li>添加<strong>涉及项目及分支名</strong>：选择项目名、填写分支名。可添加多行，使用 📂 按钮查看该项目所有分支。</li>
     <li>添加<strong>一同发版分支</strong>：填写依赖的同步分支信息（如第三方组件分支）。只有分支名非空时才会保存。</li>
@@ -284,6 +358,7 @@ kbd {
     <li>需求链接</li>
     <li>分支名称</li>
   </ul>
+  <p>搜索时<strong>所有卡片自动展开</strong>，命中的分支行直接可见；清空搜索后恢复原来的折叠 / 展开状态。</p>
   <p>点击搜索框右侧 ✕ 按钮或按 <kbd>Escape</kbd> 清除搜索。</p>
 </div>
 
@@ -389,9 +464,17 @@ kbd {
 
 <div class="card">
   <h3>影响面提示</h3>
-  <p>需求列表里，如果某条需求的分支还覆盖<strong>其他需求</strong>，分支旁边会出现橙色徽标
-  「还覆盖 N 个需求」，鼠标悬停可看具体需求ID。</p>
+  <p>分支行上的橙黄色徽标就是<strong>影响面</strong>，显示成 <code>+1</code> / <code>+3</code> 这种样子：
+  表示这条分支的提交里还带着<strong>另外几个需求</strong>的改动（<code>+3</code> = 这条分支还覆盖 3 个需求）。</p>
+  <ul>
+    <li><strong>只覆盖 1 个</strong>需求时是淡色徽标，<strong>覆盖 2 个及以上</strong>时是实心徽标 —— 实心的要多看两眼。</li>
+    <li><strong>鼠标悬浮</strong>在徽标上会弹出气泡，里面写清：这条分支有多少个独占提交、最近一次提交是什么时候，
+      以及<strong>具体覆盖了哪几个需求</strong>（需求ID + 需求名称）。</li>
+    <li>气泡里的每一条需求<strong>都可以点开飞书需求详情</strong>，确认是不是要一起发。</li>
+  </ul>
   <p>这是为了防止漏发：融合分支很容易只被登记到一个需求名下，实际却带着好几个需求的改动。</p>
+  <p class="note">看的是<strong>提交记录里的需求ID</strong>（反查），所以连「分支名里没写需求」的情况也能覆盖到；
+  没有配本地克隆路径、拿不到提交历史的项目，算不出影响面，也就不会有这个徽标。</p>
 </div>
 
 <div class="card">
@@ -453,7 +536,8 @@ kbd {
 
 <div class="card">
   <h3>分支点击 MR 跳转</h3>
-  <p>在需求列表中，点击分支名会自动<strong>复制分支名</strong>到剪贴板。如果该项目配置了 MR 地址，还会在新标签页打开 MR 创建页面：</p>
+  <p>在需求卡片的分支行里，点击分支名会自动<strong>复制分支名</strong>到剪贴板，并打开 GitLab 的「新建 MR」页面
+  （来源分支与目标分支已预填，目标分支按下表取）。只有该项目配置了 MR 地址时才会打开页面：</p>
   <table class="table-demo">
     <tr><th style="width:100px">需求状态</th><th>MR 目标分支</th></tr>
     <tr><td><span class="tag tag-new">新建</span></td><td><code>test</code></td></tr>
@@ -647,7 +731,7 @@ kbd {
     <tr><th style="width:120px">快捷键</th><th>功能</th></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>N</kbd></td><td>新增需求</td></tr>
     <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>聚焦搜索框</td></tr>
-    <tr><td><kbd>Escape</kbd></td><td>关闭所有弹窗 / 清除搜索 / 关闭右键菜单</td></tr>
+    <tr><td><kbd>Escape</kbd></td><td>关闭所有弹窗 / 清除搜索 / 关闭右键菜单 / 退出排序模式</td></tr>
   </table>
 </div>
 

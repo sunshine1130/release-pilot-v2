@@ -33,6 +33,12 @@
   --purple-light: #ede9fe;
   --cyan: #06b6d4;
   --cyan-bg: rgba(6,182,212,0.08);
+  /* 「一同发版」的配色：极浅底 + 左侧细色条 + 小标签，不用浓底色压人 */
+  --sync: #6366f1;
+  --sync-bg: #f6f7ff;
+  --sync-bg-hover: #eef0fe;
+  --sync-border: rgba(99,102,241,0.30);
+  --sync-text: #4338ca;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.03);
   --shadow: 0 2px 6px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.03);
   --shadow-lg: 0 4px 12px rgba(0,0,0,0.06), 0 16px 40px rgba(0,0,0,0.04);
@@ -606,14 +612,17 @@ input.inline-input {
 .collapse-header h2 {
   margin-right: 10px;
 }
+/* 分组 / 面板的折叠：max-height 0 ⇄ none，**瞬时但一定收得干净**。
+   为什么不在这里用 grid-template-rows 动画：这些容器里通常不止一个子元素、而且子元素是 flex，
+   0fr 行的最小值会被子元素的 min-content 撑住（min-height:0 / overflow:hidden 都压不住自动最小值），
+   实测收起后仍残留 10~40px —— 表现就是"折叠没用"。卡片那边只有单一子项，动画是准的，
+   所以动画只留在卡片上（见 .req-body）。 */
 .collapse-body {
   overflow: hidden;
   max-height: 0;
-  transition: max-height var(--transition-slow);
 }
 .collapse-body.expanded {
-  /* 不能用固定上限：未登记分支上百张卡片时单卡片约 40px，4000px 之后的内容
-     会被 overflow:hidden 永久裁掉，尾部按钮点不到 */
+  /* 不能用固定上限：未登记分支上百张卡片时单卡片约 40px，4000px 之后的内容会被裁掉、尾部按钮点不到 */
   max-height: none;
 }
 
@@ -632,10 +641,8 @@ input.inline-input {
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
-.project-tag.has-mr {
-  border: 2px solid currentColor;
-  font-weight: 600;
-}
+/* 标签只有浅色一套：曾用 .has-mr 实心色块表示「配了 MR 可点击」，2026-11 起全站统一浅色，
+   可点击性由 hover 抬升（上方 :hover）+ 指针 + title 文案表达，不再用配色区分 */
 .project-tag[data-color="0"] { background: #ffcdd2; color: #b71c1c; border: 1px solid rgba(183,28,28,0.12); }
 .project-tag[data-color="1"] { background: #c8e6c9; color: #2e7d32; border: 1px solid rgba(46,125,50,0.12); }
 .project-tag[data-color="2"] { background: #bbdefb; color: #1565c0; border: 1px solid rgba(21,101,192,0.12); }
@@ -666,36 +673,6 @@ input.inline-input {
 .project-tag[data-color="27"] { background: #c8e6c9; color: #2e7d32; border: 1px solid rgba(46,125,50,0.12); }
 .project-tag[data-color="28"] { background: #bbdefb; color: #1565c0; border: 1px solid rgba(21,101,192,0.12); }
 .project-tag[data-color="29"] { background: #ffe0b2; color: #e65100; border: 1px solid rgba(230,81,0,0.12); }
-.project-tag[data-color="0"].has-mr { background: #ef5350; color: #fff; }
-.project-tag[data-color="1"].has-mr { background: #66bb6a; color: #fff; }
-.project-tag[data-color="2"].has-mr { background: #42a5f5; color: #fff; }
-.project-tag[data-color="3"].has-mr { background: #ffa726; color: #fff; }
-.project-tag[data-color="4"].has-mr { background: #ab47bc; color: #fff; }
-.project-tag[data-color="5"].has-mr { background: #26a69a; color: #fff; }
-.project-tag[data-color="6"].has-mr { background: #fdd835; color: #333; }
-.project-tag[data-color="7"].has-mr { background: #ec407a; color: #fff; }
-.project-tag[data-color="8"].has-mr { background: #5c6bc0; color: #fff; }
-.project-tag[data-color="9"].has-mr { background: #9ccc65; color: #fff; }
-.project-tag[data-color="10"].has-mr { background: #ff7043; color: #fff; }
-.project-tag[data-color="11"].has-mr { background: #29b6f6; color: #fff; }
-.project-tag[data-color="12"].has-mr { background: #a1887f; color: #fff; }
-.project-tag[data-color="13"].has-mr { background: #ef5350; color: #fff; }
-.project-tag[data-color="14"].has-mr { background: #66bb6a; color: #fff; }
-.project-tag[data-color="15"].has-mr { background: #42a5f5; color: #fff; }
-.project-tag[data-color="16"].has-mr { background: #ffa726; color: #fff; }
-.project-tag[data-color="17"].has-mr { background: #ab47bc; color: #fff; }
-.project-tag[data-color="18"].has-mr { background: #26a69a; color: #fff; }
-.project-tag[data-color="19"].has-mr { background: #fdd835; color: #333; }
-.project-tag[data-color="20"].has-mr { background: #ec407a; color: #fff; }
-.project-tag[data-color="21"].has-mr { background: #5c6bc0; color: #fff; }
-.project-tag[data-color="22"].has-mr { background: #9ccc65; color: #fff; }
-.project-tag[data-color="23"].has-mr { background: #ff7043; color: #fff; }
-.project-tag[data-color="24"].has-mr { background: #29b6f6; color: #fff; }
-.project-tag[data-color="25"].has-mr { background: #a1887f; color: #fff; }
-.project-tag[data-color="26"].has-mr { background: #ef5350; color: #fff; }
-.project-tag[data-color="27"].has-mr { background: #66bb6a; color: #fff; }
-.project-tag[data-color="28"].has-mr { background: #42a5f5; color: #fff; }
-.project-tag[data-color="29"].has-mr { background: #ffa726; color: #fff; }
 .branch-tag {
   display: inline-flex;
   align-items: center;
@@ -815,6 +792,18 @@ input.inline-input {
   font-weight: 600;
   color: var(--text);
 }
+/* 弹窗右上角的关闭按钮：原来只给 .note-header / .branch-header 里的写了样式，
+   备份记录、同步设置这些弹窗的 × 是裸字符，所以看着丑。这里补一个通用样式 */
+.btn-close {
+  width: 26px; height: 26px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; border-radius: 8px;
+  color: var(--text-muted); font-size: 16px; line-height: 1; cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.btn-close:hover { background: var(--surface-hover); color: var(--text); }
+.btn-close:active { background: var(--border-light); }
+
 .note-header .btn-close {
   background: none;
   border: none;
@@ -855,6 +844,12 @@ input.inline-input {
   color: var(--text-muted);
   margin-bottom: 8px;
 }
+.note-readonly-tag {
+  margin-left: 8px; padding: 1px 7px; border-radius: 8px;
+  font-size: 10px; font-weight: 500; color: var(--text-muted);
+  background: var(--surface-raised); border: 1px solid var(--border-light);
+  vertical-align: 2px;
+}
 .note-footer {
   display: flex;
   justify-content: flex-end;
@@ -888,8 +883,10 @@ input.inline-input {
 .branch-ctx-item.danger { color: var(--danger); }
 .branch-ctx-item.danger:hover { background: var(--danger-bg); }
 
+/* 这一列装的是变长列表（项目 + 分支 + 影响面 + 备注），不能封顶：
+   实测一条需求挂 4 个项目分支、行宽 487px 时，450px 的上限会让「还覆盖 N 个需求」标签
+   直接画到右边「操作」列上。列宽交给内容决定，装不下由 .table-wrap 横向滚动兜底。 */
 .td-projects {
-  max-width: 450px;
   min-width: 280px;
 }
 .action-btns .btn {
@@ -1429,7 +1426,7 @@ input[data-role="syncProjectName"] {
 /* ===== Empty state ===== */
 .empty-state {
   text-align: center;
-  padding: 48px 20px;
+  padding: 22px 20px;
   color: var(--text-muted);
   font-size: 14px;
   background: var(--surface-raised);
@@ -1678,3 +1675,269 @@ input[data-role="syncProjectName"] {
   font-size: 11px; color: var(--text-muted); display: inline-block;
 }
 .sync-group-header .arrow.open { transform: rotate(90deg); }
+
+/* ===== UI 优化（2026-11）=====
+   改动只落在视觉层：把原来「11 个控件平铺一排、5 种实心色互相抢焦点」的头部收成
+   有分组、有主次的工具条；把需求表格的列宽/行高/状态可扫读性理顺。交互、文案、
+   类名一律不动，验证套件里的选择器与断言因此全部照旧。 */
+
+/* --- 头部：标题行 + 工具条两行，版本徽章与端口提示归到标题右侧 --- */
+.page-header { margin-bottom: var(--spacing-md); }
+.header-top { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-md); flex-wrap: wrap; }
+.header-meta { display: flex; align-items: center; gap: 8px; }
+.page-title { font-size: 23px; }
+.port-note { margin: 0; }
+
+.header-actions {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  /* 工具条整页吸顶（它挂在 .container 下，不再是 .page-header 的子元素）：
+     需求多的时候滚到第 10 条也够得着「刷新分支索引」「同步飞书项目」 */
+  position: sticky; top: 0; z-index: 40;
+  padding: 10px 0 12px; margin-bottom: var(--spacing-md);
+  background: rgba(245, 247, 250, 0.94);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 12px -12px rgba(15, 23, 42, 0.25);
+}
+.search-wrap input { width: 280px; }
+
+/* --- 工具条分组：分组边界交给容器，组内按钮不再各自描边或实心 --- */
+.action-group {
+  display: flex; align-items: center; gap: 2px; padding: 3px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 11px; box-shadow: var(--shadow-sm);
+}
+.action-group .btn {
+  border-color: transparent; background: transparent; box-shadow: none;
+  color: var(--text-secondary); font-weight: 500;
+}
+.action-group .btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.action-group .btn-success { color: #047857; }
+.action-group .btn-success:hover:not(:disabled) { background: var(--success-bg); color: #047857; }
+.action-group .btn-warning { color: #b45309; }
+.action-group .btn-warning:hover:not(:disabled) { background: var(--warning-bg); color: #b45309; }
+.action-group .btn-info { color: #0e7490; }
+.action-group .btn-info:hover:not(:disabled) { background: var(--cyan-bg); color: #0e7490; }
+.action-group .btn-purple { color: #6d28d9; }
+.action-group .btn-purple:hover:not(:disabled) { background: var(--purple-bg); color: #6d28d9; }
+/* 「只看我的分支」是分支组里的开关，做成小胶囊，免得和按钮混成同一种东西 */
+.header-check { padding: 5px 9px; border-radius: 8px; }
+.header-check:hover { background: var(--surface-hover); }
+.header-check input { accent-color: var(--accent); margin: 0; }
+
+/* --- 分组头：标题 / 数量 / 右侧操作分三层，右侧不再抢视线 --- */
+.section-header { padding: 10px 14px; }
+.section-header h2 { font-size: 14px; font-weight: 600; }
+.section-header .count { min-width: 22px; text-align: center; border-radius: 999px; font-weight: 600; }
+.section-header .btn-ghost { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px dashed var(--border); margin-left: 8px; }
+
+/* --- 需求表格：列宽交回浏览器（table-layout: auto），行内左侧状态色条 ---
+   不做固定列宽：这一列装的是「项目 + 分支 + 影响面」这种变长列表，锁死列宽就只能靠换行或
+   省略号硬塞，结果是行又高又碎、或者分支名看不全。自适应列宽下浏览器会把这一列撑到够宽，
+   表格容器横向滚动兜底 —— 信息完整、行高也不变形。 */
+th, td { padding: 11px 12px; }
+td { vertical-align: top; }
+/* 自适应列宽会「按内容重要性」重新分配：变长的那两列一旦需求大宽度，需求名称列会被压到
+   只剩两三个字、名字拆成五行（实测 90px）。给它一个下限，宁可整体横向滚动也不能让名字没法读。 */
+td:first-child { min-width: 220px; }
+td:first-child strong { font-weight: 550; line-height: 1.45; }
+td .link { font-size: 13px; font-family: var(--mono); white-space: nowrap; }
+.link-arrow { font-size: 10px; margin-left: 3px; opacity: .65; }
+.cell-empty { color: var(--text-disabled); }
+/* 状态色条用 border-left：首列同时要挂「冻结列投影」，两者都用 box-shadow 会互相覆盖 */
+tbody tr.row-new td:first-child { border-left: 3px solid var(--accent); }
+tbody tr.row-pending td:first-child { border-left: 3px solid var(--warning); }
+tbody tr.row-releasing td:first-child { border-left: 3px solid var(--purple); }
+tbody tr.row-released td:first-child { border-left: 3px solid var(--success); }
+/* 长列表里逐行缩放会让整页轻微抖动，悬停高亮已经够表达「这一行」 */
+tbody tr:hover { transform: none; }
+
+/* --- 首列「需求名称」与末列「操作」冻结，中间列横向滚动 ---
+   变长的「项目 + 分支」列可以随便宽、分支名不必截断；而「这条需求是什么」和「能对它做什么」
+   永远在视野里，不用左右拉动去找。列宽足够时中间不滚动，看起来就是普通表格。 */
+.table-wrap th:first-child,
+.table-wrap td:first-child {
+  position: sticky; left: 0; z-index: 3;
+  width: 250px; min-width: 250px; max-width: 250px;
+  background: var(--surface);
+  /* 冻结列与滚动内容之间留一条投影，提示「右边还有内容」 */
+  box-shadow: 10px 0 10px -10px rgba(15, 23, 42, 0.25);
+}
+.table-wrap th.col-actions,
+.table-wrap td.col-actions {
+  position: sticky; right: 0; z-index: 3;
+  width: 210px; min-width: 210px;
+  background: var(--surface);
+  box-shadow: -10px 0 10px -10px rgba(15, 23, 42, 0.25);
+}
+/* 表头也要跟着冻住，否则横向滚动时表头文字会从冻结列上滑过去 */
+.table-wrap thead th:first-child,
+.table-wrap thead th.col-actions { background: var(--surface-raised); z-index: 4; }
+/* 悬停底色得跟着冻结列一起变，不然这两格会「漏出」没高亮 */
+tbody tr:hover td:first-child,
+tbody tr:hover td.col-actions { background: var(--surface-hover); }
+
+/* --- 操作列：按钮收紧、不换行（4 个动作排一行，靠自适应列宽给它足够宽度） --- */
+.action-btns { display: flex; flex-wrap: nowrap; gap: 6px; justify-content: flex-end; }
+.action-btns .btn { margin: 0; min-height: 23px; padding: 2px 8px; font-size: 11px; }
+
+/* --- 标签：项目/分支/状态各自的辨识度再拉开一点（分支名一律完整显示，不截断） --- */
+.status-tag { font-size: 11px; padding: 3px 9px; border-radius: 999px; font-weight: 500; }
+.project-tag { font-weight: 500; }
+.branch-tag .branch-text { font-family: var(--mono); font-size: 11.5px; }
+.pm-header { padding: 12px 14px; }
+.pm-header .hint { font-weight: 400; }
+
+/* --- 未登记分支：之前用警告色竖条，实机看太像「报错」，改中性灰；
+       「有 N 条查不到登记」这件事本身已经在分组头的提示文案里说了 --- */
+.unreg-card { border-left: 3px solid #cbd5e1; background: var(--surface); }
+.unreg-card:hover { border-color: var(--border-light); border-left-color: #94a3b8; box-shadow: var(--shadow-sm); }
+
+/* 分组头的箭头：模板里直接切两个图标（展开=朝下 ⌄ / 收起=朝右 ›），这里只管盒子与颜色。
+   为什么不用 CSS 旋转：对「向下」的箭头做 rotate(±90deg)，实测两种状态会渲染成同一个方向，
+   不如老老实实换图标 */
+.section-header .collapse-header .arrow { display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+.section-header .collapse-header .arrow svg { display: block; }
+/* 分组头右侧那排小按钮：.collapse-header 本身没有 gap，只靠各自内边距会贴在一起 */
+.section-header .collapse-header .ghost-mini,
+.section-header .collapse-header .btn-ghost { margin-left: 8px; }
+
+/* ===== 需求区：表格 → 卡片（2026-11）=====
+   为什么不再用表格：这一栏装的是「项目 + 分支 + 影响面 + 备注」这种变长列表，锁死列宽就只能靠
+   换行/省略号硬塞，行会又高又碎；卡片让内容自己换行，且天然的「一行摘要 / 展开细节」两种粒度。 */
+.card-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr));
+  gap: 10px; margin-top: 12px; align-items: start;
+}
+@media (max-width: 1300px) { .card-grid { grid-template-columns: 1fr; } }
+
+/* 卡片底色按状态区分：都压在 3% 左右，只为「一眼分开」，不抢分支名；
+   卡片内部的行用白底托住层次（不然淡底上再叠灰底会发脏） */
+.req-card {
+  position: relative; background: #fbfcff; border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: var(--radius);
+  box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.req-card.pending { background: #fffcf6; border-left-color: var(--warning); }
+.req-card.releasing { background: #fbf9ff; border-left-color: var(--purple); }
+.req-card.released { background: #f8fcf9; border-left-color: var(--success); }
+.req-card.new, .req-card.edit-mode { background: #f7fbff; }
+.req-card:hover { box-shadow: var(--shadow); }
+.req-card.dragging { opacity: .45; }
+/* 拖拽落点提示：插到目标卡片前面 / 后面（上下半区各一个） */
+.req-card.drop-before::before, .req-card.drop-after::after {
+  content: ''; position: absolute; left: 0; right: 0; height: 3px; background: var(--accent); border-radius: 2px;
+}
+.req-card.drop-before::before { top: -2px; }
+.req-card.drop-after::after { bottom: -2px; }
+
+.req-head { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-light); }
+.req-card.collapsed .req-head { border-bottom: none; }
+.req-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 550; }
+/* 折叠态只剩一行摘要：名字必须截断成省略号，否则长名字会在 ID 链接前面折行、摘要变两行 */
+.req-card.collapsed .req-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 编辑态两个输入框：应用原有的 input.inline-input 是 width:100%（特异性 0,1,1），会压过我这里的
+   单类选择器，导致「需求链接」吃掉整行、名称框被挤成 22px。所以这里用 (0,2,0) 把宽度收回自己管 */
+.req-head .inline-input { width: auto; margin-bottom: 0; }
+.req-name-input { flex: 1 1 240px; min-width: 160px; }
+.req-link-input { flex: 0 1 230px; width: 230px; }
+.req-head .actions { flex-shrink: 0; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.req-head .actions .btn { margin: 0; }
+.cnt { flex-shrink: 0; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+/* 涉及面广的需求（本需求分支 + 同发分支 > 3）：用醒目的红底药丸标出来，
+   免得"8 个分支的需求"和"1 个分支的需求"在列表里长得一样 */
+.cnt.wide {
+  color: #fff; background: var(--danger); border-radius: 999px;
+  padding: 1px 8px; font-weight: 600;
+  box-shadow: 0 1px 4px rgba(239,68,68,.35);
+}
+.rel-time { flex-shrink: 0; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.req-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .24s ease; overflow: hidden; }
+.req-card.collapsed .req-body { grid-template-rows: 0fr; }
+.req-body-inner { min-height: 0; padding: 7px 12px 9px; display: flex; flex-direction: column; gap: 5px; transition: padding .24s ease; }
+/* 收起时内边距也要归零：只把行高收到 0 的话，这 7+9 的内边距会剩成一截空白（实测 16px） */
+.req-card.collapsed .req-body-inner { padding-top: 0; padding-bottom: 0; }
+/* 卡片里的「项目 + 分支」行：白底 + 细边框 + 圆角，内容允许换行（没有独占一行的标签了）。
+   这层基础样式之前漏搬，行会退化成一串行内元素、没有内边距和边框 */
+.line {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 3px 7px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light); background: #fff;
+}
+.req-body .line { background: #fff; }
+/* 需求ID：等宽 + 不换行，和卡片头其它文字区分开 */
+.rid { flex-shrink: 0; font-family: var(--mono); font-size: 13px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+/* 一同发版的行：靛蓝极浅底 + 行内「同发」标签就够了（左侧色条试过后觉得多余，已去掉）；
+   和「本需求自己的分支」依然一眼分开 */
+.req-body .line.sync { background: var(--sync-bg); border-color: var(--sync-border); }
+.req-body .line:hover { background: #f7f9fc; }
+.req-body .line.sync:hover { background: var(--sync-bg-hover); }
+.tag {
+  font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--sync-border); color: var(--sync-text); background: #fff; white-space: nowrap;
+}
+
+/* 展开/折叠：细线箭头（DownOutlined / UpOutlined 那种），展开朝上、收起朝下 */
+.req-head .chev {
+  flex-shrink: 0; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; border-radius: 6px; color: var(--text-muted); cursor: pointer; padding: 0;
+  transition: background .15s, color .15s;
+}
+.req-head .chev:hover { color: var(--accent); background: var(--accent-bg); }
+.req-head .chev svg { display: block; transition: transform .18s ease; }
+.req-card:not(.collapsed) .chev svg { transform: rotate(180deg); }
+.req-card.collapsed .chev svg { transform: rotate(0deg); }
+.req-head .chev .tri { display: none; }
+
+/* 拖拽手柄：只有「排序模式 + 待发版」才渲染出来（v-if 控制），这里只管样子 */
+.grip {
+  flex-shrink: 0; width: 16px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-disabled); font-size: 12px; cursor: grab; border-radius: 4px; user-select: none;
+}
+.grip:hover { color: var(--text-muted); background: var(--surface-hover); }
+.grip:active { cursor: grabbing; }
+.sort-bar {
+  display: flex; align-items: center; gap: 10px; margin: 10px 0 0; padding: 8px 12px;
+  border: 1px dashed var(--accent); border-radius: var(--radius); background: var(--accent-bg); color: var(--accent); font-size: 12px;
+}
+.ghost-mini {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-muted); cursor: pointer; white-space: nowrap;
+}
+.ghost-mini:hover { background: var(--surface-hover); color: var(--text); }
+/* 表格时代的遗留类：卡片里用不到，但别让它们影响新布局 */
+.td-projects, .col-actions, .table-wrap { min-width: 0; }
+
+/* 影响面标记：覆盖 1 个淡色、≥2 个实心；悬浮出气泡看具体是哪些需求 */
+.imp {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 999px; font-size: 10.5px; font-weight: 700; cursor: pointer;
+  border: 1px solid transparent; flex-shrink: 0;
+}
+.imp.soft { background: var(--warning-bg); color: #b45309; border-color: rgba(245,158,11,.35); }
+.imp.solid { background: var(--warning); color: #fff; }
+.imp:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(245,158,11,.35); }
+.imp-pop {
+  position: fixed; z-index: 1200; display: none; width: min(460px, 92vw);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(15,23,42,.18); padding: 10px 12px;
+}
+.imp-pop .p-head { font-family: var(--mono); font-size: 11.5px; font-weight: 600; word-break: break-all; }
+.imp-pop .p-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.imp-pop .p-sep { height: 1px; background: var(--border-light); margin: 8px 0; }
+.imp-pop .p-title { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.imp-pop a.p-item { display: flex; gap: 8px; align-items: baseline; padding: 5px 6px; border-radius: 6px; text-decoration: none; color: var(--text); }
+.imp-pop a.p-item:hover { background: var(--surface-hover); }
+.imp-pop a.p-item .pid { font-family: var(--mono); font-size: 11.5px; color: var(--accent); flex-shrink: 0; }
+.imp-pop a.p-item .ptitle { font-size: 12px; color: var(--text-secondary); flex: 1; min-width: 0; }
+.imp-pop a.p-item .parrow { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+.imp-pop .p-foot { font-size: 10.5px; color: var(--text-muted); margin-top: 6px; }
+
+/* 编辑态：卡片里的输入行（原来靠表格的 pair-row，现在自己排版） */
+.req-body .line .edit-proj { width: 130px; flex-shrink: 0; }
+.req-body .line .edit-branch { flex: 1; min-width: 200px; font-family: var(--mono); font-size: 11.5px; }
+.addline {
+  align-self: flex-start; font-size: 11px; color: var(--accent); background: none;
+  border: 1px dashed rgba(37,99,235,.4); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer;
+}
+.addline:hover { background: var(--accent-bg); }
+.line.empty-hint { background: transparent; border-style: dashed; color: var(--text-muted); font-size: 11px; }

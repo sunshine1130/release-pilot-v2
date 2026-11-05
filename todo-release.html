@@ -10,6 +10,8 @@
 <div id="app" v-cloak>
 <div class="container">
   <div class="toast" :class="{show:toastShow}">{{toastMsg}}</div>
+  <!-- 影响面气泡：挂在最外层，避免被卡片的 overflow 裁掉；鼠标能移进来点需求链接 -->
+  <div class="imp-pop" id="impactPop"></div>
 
   <!-- Daily reminder -->
   <div class="reminder-overlay" :class="{show:showReminder}">
@@ -26,34 +28,48 @@
 
   <!-- Header -->
   <div class="page-header">
-    <h1 class="page-title">需求发版管理<a href="./使用说明.html" target="_blank" class="help-icon" title="打开使用说明">?</a><span class="sub">共 {{items.length}} 条</span></h1>
-    <div class="header-actions">
-      <div class="search-wrap">
-        <span class="search-icon">🔍</span>
-        <input v-model="searchQuery" placeholder="搜索需求名称、链接ID或分支名..." />
-        <button class="search-clear" :style="{display:searchQuery?'block':'none'}" @click="searchQuery=''">&times;</button>
+    <div class="header-top">
+      <h1 class="page-title">需求发版管理<a href="./使用说明.html" target="_blank" class="help-icon" title="打开使用说明">?</a><span class="sub">共 {{items.length}} 条</span></h1>
+      <div class="header-meta">
+        <div class="port-note" v-if="portShifted"
+             :title="'引擎实际运行在 ' + apiPort + ' 端口（默认 1949 被占用，通常是老版本引擎先起来了）。浏览器按「协议+主机+端口」隔离数据，换端口等于换一份数据 —— 如果这里需求和配置是空的，先关掉占用 1949 的程序再重启引擎，或改用原来的地址打开。'">
+          引擎端口 {{apiPort}}（非默认）
+        </div>
+        <button class="version-badge" :class="{busy:updateBusy}" :disabled="updateBusy" @click="checkUpdate"
+                :title="'当前版本 ' + (appVersion.commit||'?') + (appVersion.date ? '（' + appVersion.date + '）' : '') + (appVersion.subject ? '\n' + appVersion.subject : '') + '\n\n点击：检查 GitHub 上有没有新版本，有就直接拉取'">
+          {{updateBusy ? '更新中...' : 'v' + (appVersion.commit||'?')}}
+        </button>
       </div>
+    </div>
+  </div>
+
+  <!-- 工具条独立成一行、移出 .page-header：sticky 只在「父容器高度」范围内吸顶，
+       挂在头部那种矮容器里，滚过头部就失效了；挂到 .container 下才能整页吸顶。
+       组内按钮按用途分三组（数据 / 分支 / 飞书），原来 11 个控件平铺一排、五种实心色抢焦点 -->
+  <div class="header-actions">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input v-model="searchQuery" placeholder="搜索需求名称、链接ID或分支名..." />
+      <button class="search-clear" :style="{display:searchQuery?'block':'none'}" @click="searchQuery=''">&times;</button>
+    </div>
+    <div class="action-group">
       <button class="btn btn-success btn-sm" @click="backupToProject">备份</button>
       <button class="btn btn-ghost btn-sm" title="查看项目 backup 目录里的历史备份，可整份恢复" @click="openBackupDialog">备份记录</button>
       <button class="btn btn-outline btn-sm" @click="exportToFile">导出</button>
       <label class="btn btn-outline btn-sm" style="cursor:pointer">导入 <input type="file" accept=".json" style="display:none" @change="importFromFile" /></label>
+    </div>
+    <div class="action-group">
       <button class="btn btn-warning btn-sm" @click="fetchAllBranches">获取分支</button>
       <button class="btn btn-info btn-sm" :disabled="indexBusy" @click="refreshBranchIndex(true)">{{indexBusy?'刷新中...':'刷新分支索引'}}</button>
       <label class="header-check" title="只分析你创建的分支（按分支首个独占提交的作者判定）。关闭后会包含同事的分支。">
         <input type="checkbox" :checked="indexConfig.onlyMine" @change="setOnlyMine($event.target.checked)"> 只看我的分支
       </label>
+    </div>
+    <div class="action-group">
       <button class="btn btn-purple btn-sm" @click="openSyncDialog">同步飞书项目</button>
       <button class="btn btn-outline btn-sm" @click="openSyncSettings">同步设置</button>
-      <button class="btn btn-primary" @click="startAdding">+ 新增需求</button>
     </div>
-    <div class="port-note" v-if="portShifted"
-         :title="'引擎实际运行在 ' + apiPort + ' 端口（默认 1949 被占用，通常是老版本引擎先起来了）。浏览器按「协议+主机+端口」隔离数据，换端口等于换一份数据 —— 如果这里需求和配置是空的，先关掉占用 1949 的程序再重启引擎，或改用原来的地址打开。'">
-      引擎端口 {{apiPort}}（非默认）
-    </div>
-    <button class="version-badge" :class="{busy:updateBusy}" :disabled="updateBusy" @click="checkUpdate"
-            :title="'当前版本 ' + (appVersion.commit||'?') + (appVersion.date ? '（' + appVersion.date + '）' : '') + (appVersion.subject ? '\n' + appVersion.subject : '') + '\n\n点击：检查 GitHub 上有没有新版本，有就直接拉取'">
-      {{updateBusy ? '更新中...' : 'v' + (appVersion.commit||'?')}}
-    </button>
+    <button class="btn btn-primary" @click="startAdding">+ 新增需求</button>
   </div>
 
   <!-- Branch progress -->
@@ -90,7 +106,8 @@
         <div class="tag-list">
           <template v-for="(p,i) in projectNames" :key="i">
             <span class="tag-item" v-if="editProjectIdx!==i">
-              <span class="proj-name project-tag" :class="{'has-mr':p.mr}" :data-color="getColorIdx(p.name)">{{p.name}}</span>
+              <!-- 项目名刻意不用 has-mr 实心配色：与「未登记分支」统一成浅色底+深字，配没配 MR 由旁边的 MR/NB 徽标表达 -->
+              <span class="proj-name project-tag" :data-color="getColorIdx(p.name)">{{p.name}}</span>
               <a v-if="p.mr" class="mr-link" :href="p.mr" target="_blank" title="打开 MR 页面">MR</a>
               <a v-if="p.mr" class="mr-link" :href="buildBranchUrl(p.mr,'master')" target="_blank" title="新建分支（基于 master）" style="color:var(--cyan)">NB</a>
               <span v-if="p.localPath" class="path-tag" :title="p.localPath">📁</span>
@@ -162,7 +179,8 @@
               <span class="unreg-meta">{{g.projects.length}} 个项目 · 共 {{g.totalCommits}} 个提交 · 最近 {{g.lastDate||'-'}}</span>
             </div>
             <div class="unreg-tags">
-              <span v-for="p in g.projects" :key="p.project" class="project-tag" :data-color="getColorIdx(p.project)" style="font-size:11px">{{p.project}} · {{p.commits}}</span>
+              <span v-for="p in g.projects" :key="p.project" class="project-tag" :data-color="getColorIdx(p.project)" style="font-size:11px"
+                    :title="p.project+'：这条分支在该项目有 '+p.commits+' 个提交（相对发布主线的独占提交，不含从主线继承的提交）'">{{p.project}} · {{p.commits}} 提交</span>
             </div>
             <div class="unreg-actions">
               <button class="btn btn-outline btn-xs" @click="triageBranchGroup(g,'exempt')" title="纯技术重构或环境调整，不需要需求登记">无需需求</button>
@@ -171,11 +189,11 @@
           </div>
           <div v-if="!unregisteredGroups.length" class="empty-state" style="padding:10px 0">暂无未登记分支</div>
           <div v-else-if="!filteredUnregGroups.length" class="empty-state" style="padding:10px 0">没有匹配的分支</div>
-          <div v-if="filteredTriagedGroups.length" class="unreg-restore">
-            已处置 {{filteredTriagedGroups.length}} 条：
-            <span v-for="g in filteredTriagedGroups" :key="g.name" class="unreg-restore-item">
-              {{g.name}}<span class="unreg-restore-action">（{{g.action==='exempt'?'无需需求':'已忽略'}}）</span>
-              <a href="#" @click.prevent="restoreBranchTriage(g)">恢复</a>
+          <div v-if="triagedProjects.length" class="unreg-restore">
+            已处置（按项目汇总）：
+            <span v-for="g in triagedProjects" :key="g.project" class="unreg-restore-item">
+              {{g.project}}<span class="unreg-restore-action">：{{g.ignored?'已忽略 '+g.ignored+' 分支':''}}{{g.ignored&&g.exempt?' · ':''}}{{g.exempt?'无需需求 '+g.exempt+' 分支':''}}</span>
+              <a href="#" @click.prevent="openTriagedDetail(g)">详情</a>
             </span>
           </div>
         </template>
@@ -183,169 +201,189 @@
     </div>
   </div>
 
-  <!-- Table sections -->
+  <!-- Requirement cards -->
   <template v-for="section in sections" :key="section.key">
-    <div class="section">
+    <div class="section" :class="{collapsed:!section.expanded}">
       <div class="section-header">
         <div class="collapse-header" @click="toggleSection(section.key)">
-          <span class="arrow" :class="{open:section.expanded}">▶</span>
+          <!-- 箭头直接切图标，不用 CSS 旋转 90°：旋转在两种状态下实测会渲染成同一方向 -->
+          <span class="arrow">
+            <svg v-if="section.expanded" width="14" height="14" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg v-else width="14" height="14" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
           <h2>{{section.title}}</h2>
           <span class="count" :class="'count-'+section.key">{{section.items.length||'0'}}</span>
+          <button class="ghost-mini" @click.stop="expandSectionCards(section.key)">卡片展开</button>
+          <button class="ghost-mini" @click.stop="collapseSectionCards(section.key)">卡片折叠</button>
+          <button v-if="section.key==='pending'" class="ghost-mini" @click.stop="toggleSortMode">{{sortMode?'完成排序':'排序'}}</button>
           <button v-if="section.key==='releasing'&&section.items.length" class="btn btn-ghost btn-sm" @click.stop="releaseAllToDone">全部发版</button>
         </div>
         <span style="flex:1"></span>
-        <span v-if="section.key==='releasing'" style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
+        <span v-if="section.key==='releasing'&&releasingProjects.length" style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
           <span style="color:var(--text-muted)">发版项目：</span>
-          <span v-for="p in releasingProjects" :key="p.name" class="project-tag" :class="{'has-mr':p.url}" :data-color="getColorIdx(p.name)" style="font-size:11px" :style="{cursor:p.url?'pointer':'default'}" @click="openMrUrl(p.url)" :title="p.url?'创建发版 MR → master':''">{{p.name}}</span>
+          <span v-for="p in releasingProjects" :key="p.name" class="project-tag" :data-color="getColorIdx(p.name)" style="font-size:11px" :style="{cursor:p.url?'pointer':'default'}" @click="openMrUrl(p.url)" :title="p.url?'创建发版 MR → master':''">{{p.name}}</span>
         </span>
       </div>
+      <!-- 排序模式提示：只有「待发版」能排序，进去才出现拖拽手柄（见 .grip 样式） -->
+      <div class="sort-bar" v-if="section.key==='pending'&&sortMode">
+        <span>排序模式：拖动卡片左侧的 <b>⠿</b> 手柄调整顺序（只在待发版内，顺序自动保存），调完点「完成排序」</span>
+      </div>
       <div class="collapse-body" :class="{expanded:section.expanded}">
-        <div class="card card-body-flush" style="margin-top:12px">
-          <div class="table-wrap">
-            <table>
-              <thead><tr>
-                <th style="width:120px">需求名称</th><th style="width:70px">状态</th><th style="width:100px">需求链接</th>
-                <th style="width:320px">涉及项目及分支名</th><th style="width:180px">一同发版分支</th>
-                <th v-if="section.key==='released'" style="width:120px">发版时间</th>
-                <th :style="{width:section.key==='released'?'110px':'120px'}">操作</th>
-              </tr></thead>
-              <tbody>
-                <template v-for="ai in (section.key==='pending'?addingItems:[])" :key="ai.id">
-                  <tr class="edit-row">
-                    <td><input class="inline-input" v-model="ai.name" placeholder="需求名称（必填）"></td>
-                    <td><span class="status-tag status-new">新建</span></td>
-                    <td><input class="inline-input" v-model="ai.link" placeholder="需求链接"></td>
-                    <!-- Edit projects -->
-                    <td class="td-projects" style="min-width:340px">
-                      <div v-for="(ep,epi) in ai._editProjects" :key="epi" class="pair-row">
-                        <input v-model="ep.name" placeholder="项目名" size="10" autocomplete="off" @focus="showProjDropdown(ep,'name',$event)" @blur="hideProjDropdown" @input="filterDropdown(ep,'name',ep.name)">
-                        <input v-model="ep.branch" placeholder="分支名" size="14" @input="ep.branch=ep.branch.replace(/\s/g,'')" :title="ep.branch">
-                        <button class="btn btn-outline btn-xs branch-lookup-btn" title="查看该项目所有分支" @click="openBranchLookup(ep)">📂</button>
-                        <button class="btn btn-outline btn-xs note-btn edit-note-btn" :class="{'has-notes':ep.notes}" :title="ep.notes?'编辑备注':'添加备注'" @click="openInlineNoteForEdit(ep)">📝</button>
-                        <button class="btn btn-danger btn-xs" title="移除此行" @click="ai._editProjects.splice(epi,1)">×</button>
-                      </div>
-                      <button class="btn btn-outline btn-xs" style="margin-top:4px" @click="ai._editProjects.push({name:'',branch:'',notes:''})">+ 添加分支</button>
-                    </td>
-                    <!-- Edit sync branches -->
-                    <td>
-                      <div v-for="(es,esi) in ai._editSyncBranches" :key="esi" class="pair-row">
-                        <input v-model="es.project" placeholder="项目名" size="10" autocomplete="off" @focus="showProjDropdown(es,'project',$event)" @blur="hideProjDropdown" @input="filterDropdown(es,'project',es.project)">
-                        <input v-model="es.branch" placeholder="分支名" size="14" @input="es.branch=es.branch.replace(/\s/g,'')" :title="es.branch">
-                        <button class="btn btn-outline btn-xs branch-lookup-btn" title="查看该项目所有分支" @click="openBranchLookup(es,'sync')">📂</button>
-                        <button class="btn btn-outline btn-xs note-btn edit-note-btn" :class="{'has-notes':es.notes}" :title="es.notes?'编辑备注':'添加备注'" @click="openInlineNoteForEdit(es)">📝</button>
-                        <button class="btn btn-danger btn-xs" title="移除此行" @click="ai._editSyncBranches.splice(esi,1)">×</button>
-                      </div>
-                      <button class="btn btn-outline btn-xs" style="margin-top:4px" @click="ai._editSyncBranches.push({project:'',branch:'',notes:''})">+ 添加一同发版分支</button>
-                    </td>
-                    <td>
-                      <div class="action-btns">
-                        <button class="btn btn-success btn-xs" @click="saveAdding(ai)">保存</button>
-                        <button class="btn btn-secondary btn-xs" @click="addingItems=addingItems.filter(a=>a.id!==ai.id)">取消</button>
-                      </div>
-                    </td>
-                  </tr>
-                </template>
-                <template v-for="item in section.items" :key="item.id">
-                  <tr v-if="editingIds[item.id]" class="edit-row">
-                    <td><input class="inline-input" v-model="item._editName" placeholder="需求名称（必填）"></td>
-                    <td><span class="status-tag" :class="statusClass(item.status)">{{statusLabel(item.status)}}</span></td>
-                    <td><input class="inline-input" v-model="item._editLink" placeholder="需求链接"></td>
-                    <td class="td-projects" style="min-width:340px">
-                      <div v-for="(ep,epi) in item._editProjects" :key="epi" class="pair-row">
-                        <input v-model="ep.name" placeholder="项目名" size="10" autocomplete="off" @focus="showProjDropdown(ep,'name',$event)" @blur="hideProjDropdown" @input="filterDropdown(ep,'name',ep.name)">
-                        <input v-model="ep.branch" placeholder="分支名" size="14" @input="ep.branch=ep.branch.replace(/\s/g,'')" :title="ep.branch">
-                        <button class="btn btn-outline btn-xs branch-lookup-btn" title="查看该项目所有分支" @click="openBranchLookup(ep)">📂</button>
-                        <button class="btn btn-outline btn-xs note-btn edit-note-btn" :class="{'has-notes':ep.notes}" :title="ep.notes?'编辑备注':'添加备注'" @click="openInlineNoteForEdit(ep)">📝</button>
-                        <button class="btn btn-danger btn-xs" title="移除此行" @click="item._editProjects.splice(epi,1)">×</button>
-                      </div>
-                      <button class="btn btn-outline btn-xs" style="margin-top:4px" @click="item._editProjects.push({name:'',branch:'',notes:''})">+ 添加分支</button>
-                    </td>
-                    <td>
-                      <div v-for="(es,esi) in item._editSyncBranches" :key="esi" class="pair-row">
-                        <input v-model="es.project" placeholder="项目名" size="10" autocomplete="off" @focus="showProjDropdown(es,'project',$event)" @blur="hideProjDropdown" @input="filterDropdown(es,'project',es.project)">
-                        <input v-model="es.branch" placeholder="分支名" size="14" @input="es.branch=es.branch.replace(/\s/g,'')" :title="es.branch">
-                        <button class="btn btn-outline btn-xs branch-lookup-btn" title="查看该项目所有分支" @click="openBranchLookup(es,'sync')">📂</button>
-                        <button class="btn btn-outline btn-xs note-btn edit-note-btn" :class="{'has-notes':es.notes}" :title="es.notes?'编辑备注':'添加备注'" @click="openInlineNoteForEdit(es)">📝</button>
-                        <button class="btn btn-danger btn-xs" title="移除此行" @click="item._editSyncBranches.splice(esi,1)">×</button>
-                      </div>
-                      <button class="btn btn-outline btn-xs" style="margin-top:4px" @click="item._editSyncBranches.push({project:'',branch:'',notes:''})">+ 添加一同发版分支</button>
-                    </td>
-                    <td v-if="section.key==='released'"><span style="font-size:11px;color:var(--text-muted);white-space:nowrap">{{item.releaseTime||'-'}}</span></td>
-                    <td>
-                      <div class="action-btns">
-                        <button class="btn btn-success btn-xs" @click="saveEdit(item)">保存</button>
-                        <button class="btn btn-secondary btn-xs" @click="cancelEdit(item)">取消</button>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr v-else :class="{'row-fresh':item._justAdded}">
-                    <td><strong>{{item.name}}</strong></td>
-                    <td><span class="status-tag" :class="statusClass(item.status)">{{statusLabel(item.status)}}</span></td>
-                    <td><a v-if="item.link" class="link" :href="item.link" target="_blank" :title="item.link">{{truncateUrl(item.link)}}</a><span v-else style="color:var(--text-muted)">-</span></td>
-                    <td class="td-projects">
-                      <template v-if="item.projects&&item.projects.length">
-                        <div v-for="(p,pi) in item.projects" :key="pi" style="margin-bottom:3px;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;white-space:nowrap" @contextmenu.prevent="showCtxMenu($event,item,pi,'project')" :style="{cursor:(section.key==='pending'||section.key==='new')?'context-menu':'default'}">
-                          <span class="project-tag" :class="{'has-mr':getProjectInfo(p.name)?.mr}" :data-color="getColorIdx(p.name)" :style="getProjectInfo(p.name)?.mr?{cursor:'pointer'}:{}" :title="getProjectInfo(p.name)?.mr?'点击跳转 MR':''" @click.stop="getProjectInfo(p.name)?.mr&&window.open(getProjectInfo(p.name).mr,'_blank')">{{p.name}}</span>
-                          <span v-if="p.branch" class="branch-tag">
-                            <span class="branch-text" :title="(getProjectInfo(p.name)?.mr?'🔗 ':'')+p.branch+'（点击：复制分支名并打开 GitLab 的「新建 MR」页面——只预填来源与目标分支，需要你在 GitLab 点提交；本工具不会提交或合并任何代码）'" @click.stop="clickBranch(item,p,'project')">{{truncateBranch(p.branch)}}</span>
-                            <button class="copy-btn" title="复制" @click.stop="copyText(p.branch)">📋</button>
-                          </span>
-                          <span v-if="impactIds(item,p).length" class="branch-impact" :title="'此分支还覆盖：'+impactIds(item,p).join(' / ')">还覆盖 {{impactIds(item,p).length}} 个需求</span>
-                          <button v-if="p.notes" class="note-btn has-notes" title="查看备注" @click.stop="openNoteDialog(item,pi,'project',false)">📝</button>
-                        </div>
-                      </template>
-                      <span v-else style="color:var(--text-muted)">-</span>
-                      <div v-for="s in autoSuggestions(item)" :key="s.project+s.branch"
-                           class="branch-suggest"
-                           :title="'分支索引里查到：'+s.project+' · '+s.branch+(s.otherBranches.length?'（该项目另有 '+s.otherBranches.join(' / ')+'）':'')+'，点击挂到本需求'"
-                           @click.stop="adoptSuggestion(item,s)">自动匹配：{{s.project}} · {{truncateBranch(s.branch)}}</div>
-                    </td>
-                    <td>
-                      <template v-if="item.syncBranches&&item.syncBranches.length">
-                        <div v-for="(sb,sbi) in item.syncBranches" :key="sbi" style="margin-bottom:3px;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;white-space:nowrap" @contextmenu.prevent="showCtxMenu($event,item,sbi,'sync')" :style="{cursor:(section.key==='pending'||section.key==='new')?'context-menu':'default'}">
-                          <span v-if="sb.project" class="project-tag" :class="{'has-mr':getProjectInfo(sb.project)?.mr}" :data-color="getColorIdx(sb.project)" :style="getProjectInfo(sb.project)?.mr?{cursor:'pointer'}:{}" :title="getProjectInfo(sb.project)?.mr?'点击跳转 MR':''" @click.stop="getProjectInfo(sb.project)?.mr&&window.open(getProjectInfo(sb.project).mr,'_blank')">{{sb.project}}</span>
-                          <span v-if="sb.branch" class="branch-tag">
-                            <span class="branch-text" :title="(getProjectInfo(sb.project)?.mr?'🔗 ':'')+sb.branch+'（点击：复制分支名并打开 GitLab 的「新建 MR」页面——只预填来源与目标分支，需要你在 GitLab 点提交；本工具不会提交或合并任何代码）'" @click.stop="clickBranch(item,{name:sb.project,branch:sb.branch},'sync')">{{truncateBranch(sb.branch)}}</span>
-                            <button class="copy-btn" title="复制" @click.stop="copyText(sb.branch)">📋</button>
-                          </span>
-                          <span v-if="impactIds(item,sb).length" class="branch-impact" :title="'此分支还覆盖：'+impactIds(item,sb).join(' / ')">还覆盖 {{impactIds(item,sb).length}} 个需求</span>
-                          <button v-if="sb.notes" class="note-btn has-notes" title="查看备注" @click.stop="openNoteDialog(item,sbi,'sync',false)">📝</button>
-                        </div>
-                      </template>
-                      <span v-else style="color:var(--text-muted)">-</span>
-                    </td>
-                    <td v-if="section.key==='released'"><span style="font-size:11px;color:var(--text-muted);white-space:nowrap">{{item.releaseTime||'-'}}</span></td>
-                    <td>
-                      <div class="action-btns">
-                        <template v-if="item.status==='new'">
-                          <button class="btn btn-info btn-xs" @click="startEdit(item)">编辑</button>
-                          <button class="btn btn-warning btn-xs" @click="changeStatus(item,'pending')">设为待发版</button>
-                          <button class="btn btn-danger btn-xs" @click="showConfirm(item)">删</button>
-                        </template>
-                        <template v-else-if="item.status==='pending'">
-                          <button class="btn btn-info btn-xs" @click="startEdit(item)">编辑</button>
-                          <button class="btn btn-purple btn-xs" @click="releaseItem(item)">发版</button>
-                          <button class="btn btn-secondary btn-xs" @click="changeStatus(item,'new')">回退新建</button>
-                          <button class="btn btn-danger btn-xs" @click="showConfirm(item)">删</button>
-                        </template>
-                        <template v-else-if="item.status==='releasing'">
-                          <button class="btn btn-success btn-xs" @click="changeStatus(item,'released')">标记已发版</button>
-                          <button class="btn btn-warning btn-xs" @click="changeStatus(item,'pending')">恢复待发版</button>
-                          <button class="btn btn-danger btn-xs" @click="showConfirm(item)">删</button>
-                        </template>
-                        <template v-else>
-                          <button class="btn btn-warning btn-xs" @click="changeStatus(item,'pending')">恢复待发版</button>
-                          <button class="btn btn-danger btn-xs" @click="showConfirm(item)">删</button>
-                        </template>
-                      </div>
-                    </td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
+        <div class="card-grid" v-if="section.items.length||(section.key==='pending'&&addingItems.length)"
+             @dragover="onGridDragOver($event)" @drop="onGridDrop($event)" @dragend="onDragEnd">
+
+          <!-- ===== 新增态 ===== -->
+          <div v-for="ai in (section.key==='pending'?addingItems:[])" :key="ai.id" class="req-card new edit-mode">
+            <div class="req-head">
+              <input class="inline-input req-name-input" v-model="ai.name" placeholder="需求名称（必填）">
+              <input class="inline-input req-link-input" v-model="ai.link" placeholder="需求链接">
+              <div class="actions">
+                <button class="btn btn-success btn-xs" @click="saveAdding(ai)">保存</button>
+                <button class="btn btn-secondary btn-xs" @click="addingItems=addingItems.filter(a=>a.id!==ai.id)">取消</button>
+              </div>
+            </div>
+            <div class="req-body">
+              <div class="req-body-inner">
+              <div class="line" v-for="(ep,epi) in ai._editProjects" :key="epi">
+                <input class="inline-input edit-proj" v-model="ep.name" placeholder="项目名" autocomplete="off" @focus="showProjDropdown(ep,'name',$event)" @blur="hideProjDropdown" @input="filterDropdown(ep,'name',ep.name)">
+                <input class="inline-input edit-branch" v-model="ep.branch" placeholder="分支名" @input="ep.branch=ep.branch.replace(/\s/g,'')" :title="ep.branch">
+                <button class="btn btn-outline btn-xs branch-lookup-btn" title="查看该项目所有分支" @click="openBranchLookup(ep)">📂</button>
+                <button class="btn btn-outline btn-xs note-btn edit-note-btn" :class="{'has-notes':ep.notes}" :title="ep.notes?'编辑备注':'添加备注'" @click="openInlineNoteForEdit(ep)">📝</button>
+                <button class="btn btn-danger btn-xs" title="移除此行" @click="ai._editProjects.splice(epi,1)">×</button>
+              </div>
+              <button class="addline" @click="ai._editProjects.push({name:'',branch:'',notes:''})">+ 添加分支</button>
+              <div class="line sync" v-for="(es,esi) in ai._editSyncBranches" :key="esi">
+                <span class="tag">同发</span>
+                <input class="inline-input edit-proj" v-model="es.project" placeholder="项目名" autocomplete="off" @focus="showProjDropdown(es,'project',$event)" @blur="hideProjDropdown" @input="filterDropdown(es,'project',es.project)">
+                <input class="inline-input edit-branch" v-model="es.branch" placeholder="分支名" @input="es.branch=es.branch.replace(/\s/g,'')" :title="es.branch">
+                <button class="btn btn-outline btn-xs branch-lookup-btn" title="查看该项目所有分支" @click="openBranchLookup(es,'sync')">📂</button>
+                <button class="btn btn-outline btn-xs note-btn edit-note-btn" :class="{'has-notes':es.notes}" :title="es.notes?'编辑备注':'添加备注'" @click="openInlineNoteForEdit(es)">📝</button>
+                <button class="btn btn-danger btn-xs" title="移除此行" @click="ai._editSyncBranches.splice(esi,1)">×</button>
+              </div>
+              <button class="addline" @click="ai._editSyncBranches.push({project:'',branch:'',notes:''})">+ 添加一同发版分支</button>
+            </div>
+            </div>
           </div>
-          <div class="empty-state" v-if="section.items.length===0&&(section.key!=='pending'||addingItems.length===0)">{{section.empty}}</div>
+
+          <!-- ===== 需求卡片（编辑态 / 展示态） ===== -->
+          <div v-for="item in section.items" :key="item.id" class="req-card"
+               :class="[item.status, {'collapsed':isItemCollapsed(item), 'row-fresh':item._justAdded}]"
+               :data-key="itemKey(item)" :data-status="item.status">
+
+            <div class="req-head">
+              <span v-if="section.key==='pending'&&sortMode" class="grip" draggable="true" title="拖动排序（仅排序模式）" @dragstart="onDragStart($event,item)">⠿</span>
+              <button class="chev" :title="isItemCollapsed(item)?'展开':'折叠'" @click="toggleItemCollapse(item)">
+                <svg width="13" height="13" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+
+              <template v-if="editingIds[item.id]">
+                <input class="inline-input req-name-input" v-model="item._editName" placeholder="需求名称（必填）">
+                <input class="inline-input req-link-input" v-model="item._editLink" placeholder="需求链接">
+                <div class="actions">
+                  <button class="btn btn-success btn-xs" @click="saveEdit(item)">保存</button>
+                  <button class="btn btn-secondary btn-xs" @click="cancelEdit(item)">取消</button>
+                </div>
+              </template>
+
+              <template v-else>
+                <span class="req-name">{{item.name}}</span>
+                <a v-if="item.link" class="link rid" :href="item.link" target="_blank" :title="item.link">{{ selfWorkItemId(item) || '详情' }}<span class="link-arrow">↗</span></a>
+                <span class="cnt" :class="{wide:isWideItem(item)}" :title="isWideItem(item)?wideItemTitle(item):''">{{ isWideItem(item) ? '⚠ ' : '' }}{{ branchCountLabel(item) }}</span>
+                <span v-if="section.key==='released'" class="rel-time">发版时间 {{item.releaseTime||'—'}}</span>
+                <!-- 排序模式下隐藏操作按钮：拖卡片时「发版」「删」都可点，误触直接改状态 -->
+                <div class="actions" v-if="!(section.key==='pending'&&sortMode)">
+                  <template v-if="item.status==='new'">
+                    <button class="btn btn-info btn-xs" @click="startEdit(item)">编辑</button>
+                    <button class="btn btn-warning btn-xs" @click="changeStatus(item,'pending')">设为待发版</button>
+                    <button class="btn btn-danger btn-xs" @click="showConfirm(item)">删</button>
+                  </template>
+                  <template v-else-if="item.status==='pending'">
+                    <button class="btn btn-info btn-xs" @click="startEdit(item)">编辑</button>
+                    <button class="btn btn-purple btn-xs" @click="releaseItem(item)">发版</button>
+                    <button class="btn btn-secondary btn-xs" @click="changeStatus(item,'new')">回退新建</button>
+                    <button class="btn btn-danger btn-xs" @click="showConfirm(item)">删</button>
+                  </template>
+                  <template v-else-if="item.status==='releasing'">
+                    <button class="btn btn-success btn-xs" @click="changeStatus(item,'released')">标记已发版</button>
+                    <button class="btn btn-warning btn-xs" @click="changeStatus(item,'pending')">恢复待发版</button>
+                    <button class="btn btn-danger btn-xs" @click="showConfirm(item)">删</button>
+                  </template>
+                  <template v-else>
+                    <button class="btn btn-warning btn-xs" @click="changeStatus(item,'pending')">恢复待发版</button>
+                    <button class="btn btn-danger btn-xs" @click="showConfirm(item)">删</button>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <!-- 编辑态：项目/分支就地改 -->
+            <div class="req-body" v-if="editingIds[item.id]">
+              <div class="req-body-inner">
+              <div class="line" v-for="(ep,epi) in item._editProjects" :key="epi">
+                <input class="inline-input edit-proj" v-model="ep.name" placeholder="项目名" autocomplete="off" @focus="showProjDropdown(ep,'name',$event)" @blur="hideProjDropdown" @input="filterDropdown(ep,'name',ep.name)">
+                <input class="inline-input edit-branch" v-model="ep.branch" placeholder="分支名" @input="ep.branch=ep.branch.replace(/\s/g,'')" :title="ep.branch">
+                <button class="btn btn-outline btn-xs branch-lookup-btn" title="查看该项目所有分支" @click="openBranchLookup(ep)">📂</button>
+                <button class="btn btn-outline btn-xs note-btn edit-note-btn" :class="{'has-notes':ep.notes}" :title="ep.notes?'编辑备注':'添加备注'" @click="openInlineNoteForEdit(ep)">📝</button>
+                <button class="btn btn-danger btn-xs" title="移除此行" @click="item._editProjects.splice(epi,1)">×</button>
+              </div>
+              <button class="addline" @click="item._editProjects.push({name:'',branch:'',notes:''})">+ 添加分支</button>
+              <div class="line sync" v-for="(es,esi) in item._editSyncBranches" :key="esi">
+                <span class="tag">同发</span>
+                <input class="inline-input edit-proj" v-model="es.project" placeholder="项目名" autocomplete="off" @focus="showProjDropdown(es,'project',$event)" @blur="hideProjDropdown" @input="filterDropdown(es,'project',es.project)">
+                <input class="inline-input edit-branch" v-model="es.branch" placeholder="分支名" @input="es.branch=es.branch.replace(/\s/g,'')" :title="es.branch">
+                <button class="btn btn-outline btn-xs branch-lookup-btn" title="查看该项目所有分支" @click="openBranchLookup(es,'sync')">📂</button>
+                <button class="btn btn-outline btn-xs note-btn edit-note-btn" :class="{'has-notes':es.notes}" :title="es.notes?'编辑备注':'添加备注'" @click="openInlineNoteForEdit(es)">📝</button>
+                <button class="btn btn-danger btn-xs" title="移除此行" @click="item._editSyncBranches.splice(esi,1)">×</button>
+              </div>
+              <button class="addline" @click="item._editSyncBranches.push({project:'',branch:'',notes:''})">+ 添加一同发版分支</button>
+            </div>
+            </div>
+
+            <!-- 展示态：顺序 = 项目 → 分支 → 影响面 → 备注。
+                 折叠时不隐藏 DOM，交给 grid-template-rows 做过渡动画（见 CSS） -->
+            <div class="req-body" v-else>
+              <div class="req-body-inner">
+              <template v-if="item.projects&&item.projects.length">
+                <div class="line" v-for="(p,pi) in item.projects" :key="pi"
+                     @contextmenu.prevent="showCtxMenu($event,item,pi,'project')"
+                     :style="{cursor:(section.key==='pending'||section.key==='new')?'context-menu':'default'}">
+                  <span class="project-tag" :data-color="getColorIdx(p.name)" :style="getProjectInfo(p.name)?.mr?{cursor:'pointer'}:{}" :title="getProjectInfo(p.name)?.mr?'点击跳转 MR':''" @click.stop="getProjectInfo(p.name)?.mr&&window.open(getProjectInfo(p.name).mr,'_blank')">{{p.name}}</span>
+                  <span v-if="p.branch" class="branch-tag">
+                    <span class="branch-text" :title="(getProjectInfo(p.name)?.mr?'🔗 ':'')+p.branch+'（点击：复制分支名并打开 GitLab 的「新建 MR」页面——只预填来源与目标分支，需要你在 GitLab 点提交；本工具不会提交或合并任何代码）'" @click.stop="clickBranch(item,p,'project')">{{truncateBranch(p.branch)}}</span>
+                    <button class="copy-btn" title="复制" @click.stop="copyText(p.branch)">📋</button>
+                  </span>
+                  <span v-if="impactIds(item,p).length" class="imp" :class="impactIds(item,p).length>1?'solid':'soft'"
+                        :title="'此分支还覆盖：'+impactIds(item,p).join(' / ')"
+                        @mouseenter="showImpactPop($event,item,p)" @mouseleave="hideImpactPop">+{{impactIds(item,p).length}}</span>
+                  <button v-if="p.notes" class="note-btn has-notes" title="查看备注" @click.stop="openNoteDialog(item,pi,'project',false)">📝</button>
+                </div>
+              </template>
+              <div v-else class="line empty-hint">还没有关联项目分支 —— 点「编辑」补上，或用下面的「自动匹配」把索引里查到的分支挂上来</div>
+
+              <div class="line sync" v-for="(sb,sbi) in item.syncBranches" :key="sbi"
+                   @contextmenu.prevent="showCtxMenu($event,item,sbi,'sync')"
+                   :style="{cursor:(section.key==='pending'||section.key==='new')?'context-menu':'default'}">
+                <span class="tag">同发</span>
+                <span v-if="sb.project" class="project-tag" :data-color="getColorIdx(sb.project)" :style="getProjectInfo(sb.project)?.mr?{cursor:'pointer'}:{}" :title="getProjectInfo(sb.project)?.mr?'点击跳转 MR':''" @click.stop="getProjectInfo(sb.project)?.mr&&window.open(getProjectInfo(sb.project).mr,'_blank')">{{sb.project}}</span>
+                <span v-if="sb.branch" class="branch-tag">
+                  <span class="branch-text" :title="(getProjectInfo(sb.project)?.mr?'🔗 ':'')+sb.branch+'（点击：复制分支名并打开 GitLab 的「新建 MR」页面——只预填来源与目标分支，需要你在 GitLab 点提交；本工具不会提交或合并任何代码）'" @click.stop="clickBranch(item,{name:sb.project,branch:sb.branch},'sync')">{{truncateBranch(sb.branch)}}</span>
+                  <button class="copy-btn" title="复制" @click.stop="copyText(sb.branch)">📋</button>
+                </span>
+                <span v-if="impactIds(item,sb).length" class="imp" :class="impactIds(item,sb).length>1?'solid':'soft'"
+                      :title="'此分支还覆盖：'+impactIds(item,sb).join(' / ')"
+                      @mouseenter="showImpactPop($event,item,sb)" @mouseleave="hideImpactPop">+{{impactIds(item,sb).length}}</span>
+                <button v-if="sb.notes" class="note-btn has-notes" title="查看备注" @click.stop="openNoteDialog(item,sbi,'sync',false)">📝</button>
+              </div>
+
+              <div v-for="s in autoSuggestions(item)" :key="s.project+s.branch"
+                   class="branch-suggest"
+                   :title="'分支索引里查到：'+s.project+' · '+s.branch+(s.otherBranches.length?'（该项目另有 '+s.otherBranches.join(' / ')+'）':'')+'，点击挂到本需求'"
+                   @click.stop="adoptSuggestion(item,s)">自动匹配：{{s.project}} · {{truncateBranch(s.branch)}}</div>
+            </div>
+            </div>
+          </div>
         </div>
+        <div class="empty-state" v-else>{{section.empty}}</div>
       </div>
     </div>
   </template>
@@ -388,12 +426,13 @@
 <div class="dialog-overlay" ref="noteOverlay" :style="{display:noteDialog.visible?'flex':'none'}" @click.self="closeNote">
   <div class="note-box">
     <div class="note-header">
-      <span>备注 - <span>{{noteDialog.label}}</span></span>
+      <span>备注 - <span>{{noteDialog.label}}</span><span v-if="noteDialog.readonly" class="note-readonly-tag">只读</span></span>
       <button class="btn-close" @click="closeNote">×</button>
     </div>
     <div class="note-body">
       <div class="note-info"><span style="color:var(--accent)">分支: {{noteDialog.branch||'-'}}</span> &middot; <span style="color:var(--purple)">项目: {{noteDialog.project||'-'}}</span></div>
-      <textarea id="noteTextareaEl" v-model="noteDialog.notes" placeholder="输入备注内容（如SQL脚本、DDL变更、注意事项等）..." :readonly="noteDialog.readonly" :style="{background:noteDialog.readonly?'var(--surface)':'',cursor:noteDialog.readonly?'default':''}"></textarea>
+      <!-- 只读态不再换白底：白底比可编辑的灰底更像输入框，实测会让人试着往里打字；用「只读」徽标表达 -->
+      <textarea id="noteTextareaEl" v-model="noteDialog.notes" placeholder="输入备注内容（如SQL脚本、DDL变更、注意事项等）..." :readonly="noteDialog.readonly" :style="{cursor:noteDialog.readonly?'default':''}"></textarea>
     </div>
     <div class="note-footer">
       <button class="btn btn-outline btn-sm" @click="closeNote">{{noteDialog.readonly?'关闭':'取消'}}</button>
@@ -426,18 +465,50 @@
           </div>
           <button class="btn btn-xs" :class="backupDialog.pendingRestore===f.name?'btn-danger':'btn-outline'"
                   @click="restoreBackup(f)">{{backupDialog.pendingRestore===f.name?'确认恢复':'恢复'}}</button>
+          <button class="btn btn-xs" :class="backupDialog.pendingDelete===f.name?'btn-danger':'btn-outline'"
+                  @click="deleteBackup(f)">{{backupDialog.pendingDelete===f.name?'确认删除':'删除'}}</button>
         </div>
         <div v-if="!backupDialog.files.length" class="empty-state" style="padding:20px 0">还没有备份，点右上角「备份」立即存一份</div>
       </template>
     </div>
     <div class="sync-footer">
-      <span class="sync-hint">备份写在项目目录里，清浏览器缓存也不会丢；点「恢复」会整份覆盖当前数据（需点两次确认）</span>
+      <span class="sync-hint">备份写在项目目录里，清浏览器缓存也不会丢；「恢复」会整份覆盖当前数据、「删除」会把文件从磁盘删掉（都要点两次确认）</span>
       <button class="btn btn-purple btn-sm" @click="backupToProject().then(loadBackups)">立即备份</button>
       <button class="btn btn-outline btn-sm" @click="backupDialog.visible=false">关闭</button>
     </div>
   </div>
 </div>
 
+<!-- 已处置分支详情（按项目汇总的「详情」入口）：按最后提交时间倒序，半年前的老分支不列。
+     用独立的 .triage-box 且只在打开时进 DOM：否则它会和「同步设置」弹窗共用 .sync-box，
+     把按容器区分的选择器变成多匹配 -->
+<div class="dialog-overlay" v-if="triagedDialog.visible" style="display:flex" @click.self="triagedDialog.visible=false">
+  <div class="sync-box triage-box">
+    <div class="sync-header">
+      <span>已处置分支 · {{triagedDialog.project}}</span>
+      <button class="btn-close" @click="triagedDialog.visible=false">&times;</button>
+    </div>
+    <div class="sync-body">
+      <div class="backup-path">
+        <span class="backup-path-label">共</span>
+        <code>{{triagedDialog.entries.length}} 条</code>
+        <span class="sync-hint">按最后提交时间倒序；最后提交超过半年的老分支不再列出</span>
+      </div>
+      <div v-for="e in triagedDialog.entries" :key="e.key" class="backup-row">
+        <div class="backup-row-main">
+          <span class="backup-name">{{e.branch}}</span>
+          <span class="backup-meta">{{e.action==='exempt'?'无需需求':'已忽略'}} · {{e.commits===null?'提交数未知':e.commits+' 个提交'}} · 最近 {{e.lastDate||'（索引里没有这条，日期未知）'}}</span>
+        </div>
+        <button class="btn btn-outline btn-xs" @click="restoreOneTriage(e)">恢复</button>
+      </div>
+      <div v-if="!triagedDialog.entries.length" class="empty-state" style="padding:16px 0">没有可展示的已处置分支</div>
+    </div>
+    <div class="sync-footer">
+      <span class="sync-hint">点「恢复」后它会重新出现在「未登记分支」里，需要重新判断一次</span>
+      <button class="btn btn-outline btn-sm" @click="triagedDialog.visible=false">关闭</button>
+    </div>
+  </div>
+</div>
 <!-- Branch lookup modal -->
 <div class="branch-overlay" v-if="branchModal.visible" @click.self="branchModal.visible=false">
   <div class="branch-modal">

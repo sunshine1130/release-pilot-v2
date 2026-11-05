@@ -140,6 +140,13 @@ page.on('pageerror', e => jsErrors.push(e.message))
 const httpErrors = []
 page.on('response', r => { if (r.status() >= 400) httpErrors.push(`${r.status()} ${r.url()}`) })
 
+// ===== 卡片时代的公共选择器（需求区已从表格改成 .req-card 卡片）=====
+// 分组定位必须同时限定 .section 和里面的 h2：页面上还有 .section.card（项目管理面板、
+// 未登记分支面板）也叫 .section，只写 .section 会多命中两张面板。
+const sectionOf = title => page.locator('.section', { has: page.locator('h2', { hasText: title }) })
+const reqCard = text => page.locator('.req-card', { hasText: text })
+const reqCardIn = (title, text) => sectionOf(title).locator('.req-card', { hasText: text })
+
 try {
   // ===== 0) 引擎自检（HTTP 层，走原始请求绕开浏览器的 URL 归一化）=====
   // 这几条都是「一条请求打死服务/读出目录外文件」级别的问题，必须每次回归都验
@@ -151,6 +158,23 @@ try {
         res.on('end', () => resolve({ status: res.statusCode, body, headers: res.headers }))
       })
       req.on('error', e => resolve({ status: 0, body: String(e.message), headers: {} }))
+    })
+
+  // 写请求（备份/删除这类）走同一个原始 http 通道：用页面 fetch 会被 CORS/前端逻辑包一层
+  const rawPost = (rawPath, payload) =>
+    new Promise(resolve => {
+      const text = JSON.stringify(payload || {})
+      const req = http.request({
+        host: '127.0.0.1', port: PORT, path: rawPath, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text) },
+      }, res => {
+        let body = ''
+        res.on('data', c => { body += c })
+        res.on('end', () => resolve({ status: res.statusCode, body, headers: res.headers }))
+      })
+      req.on('error', e => resolve({ status: 0, body: String(e.message), headers: {} }))
+      req.write(text)
+      req.end()
     })
 
   // 非法百分号转义曾让 decodeURIComponent 抛 URIError 逃逸成 unhandled rejection → 进程退出
@@ -276,29 +300,31 @@ try {
   check('清空搜索后恢复全量', (await unregCards.count()) === totalUnreg, `恢复为 ${totalUnreg} 张`)
 
   // 4) 影响面提示：期望值从实际索引算，不能写死。
-  //    这条分支仍在长（实测 10-29 是 4 个ID、11-03 已经 6 个），写死数字必然过几天就红
+  //    这条分支仍在长（实测 10-29 是 4 个ID、11-03 已经 6 个），写死数字必然过几天就红。
+  //    卡片时代影响面不再是行内文案，而是一个 .imp 徽标（文案 +N）：覆盖 1 个是 .soft、
+  //    多个是 .solid；点开看具体是谁由 18f 那段用固定夹具验。
   const expectedOthers = await page.evaluate(({ proj, branch }) => {
     const idx = JSON.parse(localStorage.getItem('todo_branch_index') || '{}')
     const entry = idx[proj] && idx[proj].branches && idx[proj].branches[branch]
     return ((entry && entry.ids) || []).length - 1
   }, { proj: P.main.name, branch: B.fusion })
-  const impacts = await page.getByText(/还覆盖 \d+ 个需求/).allTextContents()
-  check('影响面提示数量正确（两条需求都命中）',
-    expectedOthers > 0 && impacts.length === 2 && impacts.every(t => new RegExp(`还覆盖 ${expectedOthers} 个需求`).test(t)),
-    `期望 ${expectedOthers}，实际：${impacts.map(t => t.trim()).join(' / ')}`)
+  const impactBadges = (await page.locator('.req-card .imp').allTextContents()).map(t => t.trim())
+  check('影响面徽标数量正确（两条需求都命中，文案 +N 与索引一致）',
+    expectedOthers > 0 && impactBadges.length === 2 && impactBadges.every(t => t === `+${expectedOthers}`),
+    `期望 +${expectedOthers} ×2，实际：${impactBadges.join(' / ')}`)
 
-  // 4b) 自动匹配建议：索引里查到、但需求没手工挂的分支必须在行上可见。
+  // 4b) 自动匹配建议：索引里查到、但需求没手工挂的分支必须在卡片上可见。
   //     否则「有ID、但ID不挂在这条需求上」的融合分支在页面上会彻底消失 ——
-  //     它既进不了未登记分支（有ID），也不出现在任何需求行。
-  const row4 = page.locator('tr', { hasText: 'UI验证-待挂分支' })
+  //     它既进不了未登记分支（有ID），也不出现在任何需求卡片里。
+  const row4 = page.locator('.req-card', { hasText: 'UI验证-待挂分支' })
   const chips = row4.locator('.branch-suggest')
   await chips.first().waitFor({ timeout: 30000 })
   const chipText = (await chips.first().textContent() || '').trim()
-  check('需求行显示自动匹配的建议分支',
+  check('需求卡片显示自动匹配的建议分支',
     chipText.includes(P.main.name) && chipText.includes(B.fusion), chipText)
   check('已手工挂过的分支不再重复建议',
-    (await page.locator('tr', { hasText: 'UI验证-销售预测' }).locator('.branch-suggest').count()) === 0)
-  // 截图前先把行滚到视口里：按 boundingBox 裁切时，行若在视口底部，裁出来只有几像素
+    (await page.locator('.req-card', { hasText: 'UI验证-销售预测' }).locator('.branch-suggest').count()) === 0)
+  // 截图前先把卡片滚到视口里：按 boundingBox 裁切时，卡片若在视口底部，裁出来只有几像素
   await row4.scrollIntoViewIfNeeded()
   await page.waitForTimeout(200)
   const rowBox = await row4.boundingBox()
@@ -324,7 +350,7 @@ try {
 
   // 4c) 同一项目已经挂了别的分支时，建议必须**追加一行**而不是要求用户自己去切换：
   //     一条需求的代码同时落在同仓库两条分支上是真实形态（融合分支 merge 了按需求命名的分支）
-  const row2 = page.locator('tr', { hasText: 'UI验证-老数据形态' })
+  const row2 = page.locator('.req-card', { hasText: 'UI验证-老数据形态' })
   const tagsBefore = await row2.locator('.branch-tag').count()
   await row2.locator('.branch-suggest').first().click()
   await page.waitForTimeout(400)
@@ -347,24 +373,90 @@ try {
   // 5) 处置：点「无需需求」后该分支卡片消失
   //    断言必须落在卡片本身：getByText 会同时匹配到外层容器，用文本计数会误判
   const cardOf = n => page.locator('.unreg-card', { hasText: n })
+  // 已处置现在是「按项目汇总 + 详情」：一行一个项目，不再是一条分支一行
+  const triageOverview = () => page.locator('.unreg-restore')
   const beforeCount = await cardOf(B.unregistered).count()
   await cardOf(B.unregistered).getByRole('button', { name: '无需需求' }).click()
   await page.waitForTimeout(300)
   const afterCount = await cardOf(B.unregistered).count()
   check('处置后卡片移除', beforeCount === 1 && afterCount === 0, `卡片数 ${beforeCount} → ${afterCount}`)
-  check('出现「已处置」记录', (await page.getByText(/已处置 \d+ 条/).count()) > 0)
+  check('出现「已处置」总览（按项目汇总）',
+    (await triageOverview().innerText()).includes('已处置（按项目汇总）') &&
+    (await triageOverview().locator('a', { hasText: '详情' }).count()) > 0,
+    (await triageOverview().innerText()).replace(/\s+/g, ' ').slice(0, 60))
 
   // 6) 持久化：刷新后仍然保持处置状态
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(600)
   check('刷新后处置状态保持',
-    (await cardOf(B.unregistered).count()) === 0 && (await page.getByText(/已处置 \d+ 条/).count()) > 0)
+    (await cardOf(B.unregistered).count()) === 0 &&
+    (await triageOverview().innerText()).includes('已处置（按项目汇总）'))
 
-  // 7) 恢复（上一步 reload 过，面板回到默认收起态，点之前要先展开）
+  // 7) 详情弹窗：列出该项目被处置的分支（按最后提交时间倒序）
   await expandUnreg()
-  await page.getByRole('link', { name: '恢复' }).first().click()
+  const openTriageDetail = async () => {
+    await triageOverview().locator('a', { hasText: '详情' }).first().click()
+    await page.waitForTimeout(400)
+  }
+  await openTriageDetail()
+  const triageBox = page.locator('.triage-box')
+  check('详情弹窗打开并列出被处置的分支', (await triageBox.locator('.backup-row').count()) > 0,
+    `${await triageBox.locator('.backup-row').count()} 条`)
+  const triageDatesOf = () => triageBox.locator('.backup-row .backup-meta').evaluateAll((els) =>
+    els.map(el => (el.textContent.match(/最近 (\d{4}-\d{2}-\d{2})/) || [])[1]).filter(Boolean))
+  const triageCutoff = (() => {
+    const d = new Date(Date.now() - 183 * 864e5)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+  check('详情里没有超过半年的老分支',
+    (await triageDatesOf()).every(d => d >= triageCutoff), `cutoff ${triageCutoff}；${(await triageDatesOf()).join(' / ')}`)
+  await triageBox.locator('.sync-header .btn-close').click()
+  await page.waitForTimeout(200)
+
+  // 7b) 塞三条处置记录：一条 400 天前（必须被过滤）、一条 5 天前、一条 60 天前（用来验证倒序）。
+  //     只靠真实夹具里那一条分支，是测不出"过滤"和"排序"这两条规则的（会变成空断言）
+  await page.evaluate(() => {
+    const ago = (n) => {
+      const d = new Date(Date.now() - n * 864e5)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+    const idx = JSON.parse(localStorage.getItem('todo_branch_index') || '{}')
+    const proj = Object.keys(idx)[0]
+    if (!proj) return
+    idx[proj].branches = idx[proj].branches || {}
+    idx[proj].branches['feat/超期老分支'] = { ids: [], commits: 3, lastDate: ago(400) }
+    idx[proj].branches['feat/近五天动过'] = { ids: [], commits: 2, lastDate: ago(5) }
+    idx[proj].branches['feat/六十天前动过'] = { ids: [], commits: 4, lastDate: ago(60) }
+    // 必须同时进 unregistered：未登记卡片是从它渲染的，只写 branches 的话"恢复后卡片回来"验证不了
+    idx[proj].unregistered = [...new Set([...(idx[proj].unregistered || []), 'feat/超期老分支', 'feat/近五天动过', 'feat/六十天前动过'])]
+    localStorage.setItem('todo_branch_index', JSON.stringify(idx))
+    const tri = JSON.parse(localStorage.getItem('todo_branch_triage') || '{}')
+    for (const b of ['feat/超期老分支', 'feat/近五天动过', 'feat/六十天前动过']) tri[proj + '\u0000' + b] = { action: 'ignored', at: Date.now() }
+    localStorage.setItem('todo_branch_triage', JSON.stringify(tri))
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(700)
+  await expandUnreg()
+  await openTriageDetail()
+  const seededDates = await triageDatesOf()
+  check('超过半年的处置记录确实被过滤掉（不是碰巧为空）',
+    (await triageBox.getByText('超期老分支').count()) === 0 && (await triageBox.locator('.backup-row').count()) >= 2,
+    `${await triageBox.locator('.backup-row').count()} 条可见`)
+  check('详情按最后提交时间倒序（新的在前）',
+    seededDates.length >= 2 && seededDates.every((d, i, a) => i === 0 || a[i - 1] >= d), seededDates.join(' / '))
+
+  // 7c) 详情里可以单条恢复：恢复后弹窗里少一条，并且它回到「未登记分支」卡片里
+  const firstBranch = ((await triageBox.locator('.backup-name').first().textContent()) || '').trim()
+  const rowsBefore = await triageBox.locator('.backup-row').count()
+  await triageBox.locator('.backup-row').first().getByRole('button', { name: '恢复' }).click()
+  await page.waitForTimeout(400)
+  const rowsAfter = await triageBox.locator('.backup-row').count()
+  check('详情里恢复后少一条（全恢复完则自动关闭）',
+    rowsAfter === rowsBefore - 1 || (await triageBox.isVisible()) === false,
+    `${rowsBefore} → ${rowsAfter}`)
+  if (await triageBox.isVisible()) await triageBox.locator('.sync-header .btn-close').click()
   await page.waitForTimeout(300)
-  check('恢复后卡片回来', (await cardOf(B.unregistered).count()) === 1)
+  check('被恢复的分支回到「未登记分支」里', (await cardOf(firstBranch).count()) === 1, firstBranch)
 
   // ===== 8) 飞书项目同步（真实调用 meegle CLI）=====
   // 两个弹窗共用 .sync-box，选择器必须按容器区分，否则 Playwright 严格模式会因多匹配报错
@@ -520,6 +612,10 @@ try {
   await page.waitForTimeout(300)
 
   // ===== 10) 导出的 v2 字段与导入往返 =====
+  // 备份目录工具提前备好：导入/恢复都会自动留底，整个第 10 节都要对照这份基线清理
+  const BACKUP_DIR = path.join(PROJECT_DIR, 'backup')
+  const listBackups = () => (fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).filter(n => n.endsWith('.json')) : [])
+  const backupsAtStart = listBackups()
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByRole('button', { name: '导出' }).click(),
@@ -534,17 +630,25 @@ try {
   exported.branchTriage[`${P.main.name}\u0000${B.unregistered}`] = { action: 'exempt', at: Date.now() }
   const importPath = path.join(PROJECT_DIR, '.tmp-import.json')
   fs.writeFileSync(importPath, JSON.stringify(exported))
+  const itemsBeforeImport = Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0)
   await page.locator('input[type=file]').setInputFiles(importPath)
   await page.waitForTimeout(1000)
   check('导入后处置生效（该分支卡片消失）', (await cardOf(B.unregistered).count()) === 0)
   check('导入后需求数据仍在', (await page.locator('h1 .sub').textContent() || '').includes('共'))
   fs.unlinkSync(importPath)
+  // 覆盖性导入应先自动留底：多出来的那份备份必须装着导入前一刻的数据
+  const autoImport = listBackups().filter(n => !backupsAtStart.includes(n))
+  check('导入前自动备份了当前数据', autoImport.length === 1, autoImport.join(',') || '没有新增备份')
+  if (autoImport.length) {
+    const aj = JSON.parse(fs.readFileSync(path.join(BACKUP_DIR, autoImport[0]), 'utf8'))
+    check('自动备份的内容是导入前的数据',
+      Array.isArray(aj.items) && aj.items.length === itemsBeforeImport,
+      `备份 ${(aj.items || []).length} 条 / 导入前 ${itemsBeforeImport} 条`)
+  }
 
   // ===== 10b) 备份到项目 backup/ 目录（引擎写盘）=====
   // 下载导出要用户自己挑目录、事后想不起存哪；备份固定落到项目下的 backup/，
   // 所以这里必须验证「浏览器点一下 → 磁盘上真的多出一个文件」，而不是只看 toast。
-  const BACKUP_DIR = path.join(PROJECT_DIR, 'backup')
-  const listBackups = () => (fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).filter(n => n.endsWith('.json')) : [])
   const before = listBackups()
   const itemsBeforeBackup = Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0)
 
@@ -576,12 +680,39 @@ try {
     created[0] || '')
   await backupBox.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-backup.png') })
 
+  // 删除备份：和恢复一样是覆盖/不可逆动作，所以也点两次；这里先点一次看它是否变成「确认删除」，
+  // 再用后造的一份备份真的删掉，验证「接口 200 + 磁盘文件消失 + 列表里不再有」
+  const extra = await rawPost('/api/backup', { data: { items: [], projectNames: [], branchesCache: {}, launchBranch: '' } })
+  const extraName = JSON.parse(extra.body).name
+  check('备份接口回执带轮转计数（pruned）', typeof JSON.parse(extra.body).pruned === 'number')
+  await backupBox.locator('.btn-outline', { hasText: '刷新' }).click()
+  await backupBox.locator('.backup-row', { hasText: extraName }).waitFor({ timeout: 20000 })
+  await backupBox.locator('.backup-row', { hasText: extraName }).getByRole('button', { name: '删除' }).click()
+  await page.waitForTimeout(300)
+  check('删除备份要点两次（先变成确认删除）',
+    (await backupBox.locator('.backup-row', { hasText: extraName }).getByRole('button', { name: '确认删除' }).count()) === 1)
+  check('只点一次不会真删掉文件', fs.existsSync(path.join(BACKUP_DIR, extraName)), extraName)
+  await backupBox.locator('.backup-row', { hasText: extraName }).getByRole('button', { name: '确认删除' }).click()
+  await page.waitForTimeout(600)
+  check('确认后磁盘上的备份文件被删掉', !fs.existsSync(path.join(BACKUP_DIR, extraName)), extraName)
+  check('列表里也不再出现被删的备份',
+    (await backupBox.locator('.backup-row', { hasText: extraName }).count()) === 0)
+
+  // 接口层再钉一次边界：路径穿越必须挡住、不存在要 404（删备份是本项目里少见的"破坏性"接口）
+  const delTraversal = await rawPost('/api/backup/delete?name=' + encodeURIComponent('../package.json'), {})
+  check('删除接口挡住路径穿越', delTraversal.status === 400, `HTTP ${delTraversal.status}`)
+  const delMissing = await rawPost('/api/backup/delete?name=' + encodeURIComponent('不存在的备份.json'), {})
+  check('删除不存在的备份返回 404', delMissing.status === 404, `HTTP ${delMissing.status}`)
+
   // 先改数据（新增一条）再恢复，验证恢复真的把数据拉回备份时的样子
   await backupBox.locator('.sync-footer .btn-outline', { hasText: '关闭' }).click()
   await page.waitForTimeout(200)
   await page.getByRole('button', { name: '+ 新增需求' }).click()
   await page.getByPlaceholder('需求名称（必填）').fill('备份-恢复前多出来的一条')
-  await page.locator('tr.edit-row').getByRole('button', { name: '保存' }).first().click()
+  // 新增态就是一张 .req-card.edit-mode：保存/取消按钮在 .req-head .actions 里
+  // exact 必须写：'保存' 是子串匹配，会同时命中「项目管理」面板里的「保存上线分支」，
+  // 而那个面板默认收起，Playwright 等它可见只会一直超时
+  await page.locator('.req-card.edit-mode .req-head .actions').getByRole('button', { name: '保存', exact: true }).click()
   await page.waitForTimeout(500)
   const itemsAfterAdd = Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0)
   check('恢复前先造出数据差异', itemsAfterAdd === itemsBeforeBackup + 1, `${itemsBeforeBackup} → ${itemsAfterAdd}`)
@@ -592,73 +723,120 @@ try {
   check('恢复需要二次确认',
     (await backupBox.locator('.backup-row', { hasText: created[0] }).getByRole('button', { name: '确认恢复' }).count()) === 1
     && itemsAfterAdd === Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0))
+  const beforeRestore = listBackups()
   await backupBox.locator('.backup-row', { hasText: created[0] }).getByRole('button', { name: '确认恢复' }).click()
   await page.waitForTimeout(1000)
   const itemsAfterRestore = Number(((await page.locator('h1 .sub').textContent()) || '').match(/\d+/)?.[0] || 0)
   check('恢复把数据整份拉回备份时的状态',
     itemsAfterRestore === itemsBeforeBackup && (await page.getByText('备份-恢复前多出来的一条').count()) === 0,
     `${itemsAfterAdd} → ${itemsAfterRestore}（备份时 ${itemsBeforeBackup}）`)
+  // 覆盖性恢复同样先自动留底：多出来的备份必须装着恢复前一刻的数据（即多出来的那条）
+  const autoRestore = listBackups().filter(n => !beforeRestore.includes(n))
+  check('恢复前自动备份了当前数据', autoRestore.length === 1, autoRestore.join(',') || '没有新增备份')
+  if (autoRestore.length) {
+    const aj = JSON.parse(fs.readFileSync(path.join(BACKUP_DIR, autoRestore[0]), 'utf8'))
+    check('自动备份的内容是恢复前的数据',
+      Array.isArray(aj.items) && aj.items.length === itemsAfterAdd,
+      `备份 ${(aj.items || []).length} 条 / 恢复前 ${itemsAfterAdd} 条`)
+  }
 
-  // 验证过程写进 backup/ 的是测试数据（98 条假需求），跑完必须清掉，不能留在用户的备份目录里
-  for (const f of created) fs.unlinkSync(path.join(BACKUP_DIR, f))
-  check('验证产生的测试备份已清理', listBackups().length === before.length, `目录剩 ${listBackups().length} 个`)
+  // 验证过程写进 backup/ 的是测试数据（98 条假需求 + 两份自动留底），跑完必须清掉，不能留在用户的备份目录里
+  for (const f of listBackups().filter(n => !backupsAtStart.includes(n))) fs.unlinkSync(path.join(BACKUP_DIR, f))
+  check('验证产生的测试备份已清理', listBackups().length === backupsAtStart.length, `目录剩 ${listBackups().length} 个`)
 
   // ===== 11) v1 主路径回归（v2 要替换 v1，必须确认没碰坏老功能）=====
   await page.getByRole('button', { name: '+ 新增需求' }).click()
   await page.getByPlaceholder('需求名称（必填）').fill('回归-新增需求')
-  await page.locator('tr.edit-row').getByRole('button', { name: '保存' }).first().click()
+  // exact 必须写：'保存' 是子串匹配，会同时命中「项目管理」面板里的「保存上线分支」，
+  // 而那个面板默认收起，Playwright 等它可见只会一直超时
+  await page.locator('.req-card.edit-mode .req-head .actions').getByRole('button', { name: '保存', exact: true }).click()
   await page.waitForTimeout(500)
   check('v1 新增需求', (await page.getByText('回归-新增需求').count()) > 0)
 
-  const newRow = page.locator('tr', { hasText: '回归-新增需求' })
+  const newRow = reqCard('回归-新增需求')
   await newRow.getByRole('button', { name: '设为待发版' }).click()
   await page.waitForTimeout(400)
-  check('v1 状态流转 新建→待发版', ((await newRow.locator('.status-tag').textContent()) || '').includes('待发版'))
+  // 卡片头没有状态药丸了，状态由「所在分组 + 卡片左侧色条」表达；
+  // 落到哪个分组由 data-status / 分组归属共同证明，不再有 .status-tag 可读
+  check('v1 状态流转 新建→待发版',
+    (await newRow.getAttribute('data-status')) === 'pending'
+    && (await reqCardIn('待发版', '回归-新增需求').count()) === 1,
+    `data-status=${await newRow.getAttribute('data-status')}`)
 
   // 有发版中的需求时，「发版中」分组必须仍然可折叠 ——
   // 曾在 sections computed 内部写自己的依赖，导致点折叠后重算又被置回展开
-  const releasingSection = page.locator('.section', { has: page.locator('h2', { hasText: '发版中' }) })
+  const releasingSection = sectionOf('发版中')
+  const releasingBody = releasingSection.locator('.collapse-body.expanded')
   await newRow.getByRole('button', { name: '发版' }).click()
   await page.waitForTimeout(500)
-  check('需求可进入发版中', (await page.locator('tr', { hasText: '回归-新增需求' }).locator('.status-tag').textContent() || '').includes('发版中'))
-  const releasingArrow = releasingSection.locator('.collapse-header .arrow')
-  check('有发版中需求时该分组默认展开', (await releasingArrow.getAttribute('class') || '').includes('open'))
-  await releasingSection.locator('.collapse-header').click()
+  // 跨分组的流转就用「这张卡片落到了哪个分组」来断言（卡片没有状态药丸了）
+  const inReleasing = reqCardIn('发版中', '回归-新增需求')
+  check('需求可进入发版中',
+    (await inReleasing.count()) === 1 && (await inReleasing.getAttribute('data-status')) === 'releasing')
+  // 展开态只能看 .collapse-body 的 .expanded：分组头的 .arrow 现在是静态 class，
+  // 再断言 .arrow.open 会变成永远为假的空断言
+  check('有发版中需求时该分组默认展开', (await releasingBody.count()) === 1)
+  // 点 h2 而不是 .collapse-header：分组头里现在有「卡片展开/卡片折叠/排序」等按钮，
+  // 点标题容器的几何中心可能落在按钮上（按钮带 @click.stop），分组就不会折叠
+  await releasingSection.locator('.collapse-header h2').click()
   await page.waitForTimeout(300)
-  check('发版中分组可以折叠（computed 不再回写自己的依赖）',
-    !(await releasingArrow.getAttribute('class') || '').includes('open'),
-    await releasingArrow.getAttribute('class') || '')
-  await releasingSection.locator('.collapse-header').click()
+  check('发版中分组可以折叠（computed 不再回写自己的依赖）', (await releasingBody.count()) === 0)
+  await releasingSection.locator('.collapse-header h2').click()
   await page.waitForTimeout(300)
   // 「全部发版」在折叠标题内部，没有 @click.stop 就会顺带把分组折叠
   await releasingSection.getByRole('button', { name: '全部发版' }).click()
   await page.waitForTimeout(500)
-  check('「全部发版」不会顺带折叠分组',
-    (await releasingArrow.getAttribute('class') || '').includes('open'),
-    await releasingArrow.getAttribute('class') || '')
+  check('「全部发版」不会顺带折叠分组', (await releasingBody.count()) === 1)
 
   // 分组空了必须能看到空态文案：.empty-state 曾被 display:none 写死，文案永远不显示
   check('空分区的空态文案可见',
     await releasingSection.locator('.empty-state', { hasText: '暂无发版中需求' }).isVisible())
 
-  // 这条路走完把它放回待发版：后面的编辑/删除回归要用同一个待发版的行
-  const releasedSection = page.locator('.section', { has: page.locator('h2', { hasText: '已发版' }) })
-  await releasedSection.locator('.collapse-header').click()
+  // 这条路走完把它放回待发版：后面的编辑/删除回归要用同一张待发版卡片
+  const releasedSection = sectionOf('已发版')
+  await releasedSection.locator('.collapse-header h2').click()
   await page.waitForTimeout(300)
-  await page.locator('tr', { hasText: '回归-新增需求' }).getByRole('button', { name: '恢复待发版' }).click()
+  await reqCard('回归-新增需求').getByRole('button', { name: '恢复待发版' }).click()
   await page.waitForTimeout(400)
 
-  // 表格横向滚动：窄窗口下右侧「操作」列要靠它才够得着
-  check('表格容器可横向滚动',
-    (await page.locator('.table-wrap').first().evaluate(el => getComputedStyle(el).overflowX)) === 'auto')
+  // 卡片时代已经没有「表格容器横向滚动 / 需求名称列钉左、操作列钉右」这套实现（两条旧断言已删），
+  // 但「内容不许越出容器」的精神保留：遍历 .req-card，断言它内部任何元素都不越过卡片右边界。
+  // 卡片是 overflow:hidden，越界不是「画到隔壁列」而是内容被直接裁掉，用户一样看不见。
+  // 只排除 position:fixed 的漂浮层（影响面气泡 #impactPop 就挂在 body 上，不属于卡片排版）。
+  const overflowCards = await page.evaluate(() => {
+    const bad = []
+    let scanned = 0
+    for (const card of document.querySelectorAll('.req-card')) {
+      const r = card.getBoundingClientRect()
+      if (!r.width) continue
+      for (const el of card.querySelectorAll('*')) {
+        if (getComputedStyle(el).position === 'fixed') continue
+        const cr = el.getBoundingClientRect()
+        if (!cr.width) continue
+        scanned++
+        if (cr.right > r.right + 1) {
+          bad.push(`${card.dataset.key} 的 ${el.className || el.tagName} 超出 ${Math.round(cr.right - r.right)}px`)
+        }
+      }
+    }
+    return { bad, scanned }
+  })
+  // scanned > 0 必须一起断言：卡片若全部处于折叠态（内部元素为空）这条就成了空断言
+  check('卡片里没有内容越出卡片右边界',
+    overflowCards.scanned > 0 && overflowCards.bad.length === 0,
+    overflowCards.bad.slice(0, 3).join(' | ') || `扫了 ${overflowCards.scanned} 个元素`)
 
   await newRow.getByRole('button', { name: '编辑' }).click()
   await page.getByPlaceholder('需求名称（必填）').fill('回归-编辑后')
-  await page.locator('tr.edit-row').getByRole('button', { name: '保存' }).first().click()
+  // 编辑态不是独立行，而是原卡片自己切成编辑态：卡片头的 .req-name 被换成 input，
+  // 所以这时已经不能用需求名 hasText 找它，改用「有 .req-name-input 的那张卡片」定位，
+  // 保存/取消按钮仍然在 .req-head .actions 里
+  await page.locator('.req-card', { has: page.locator('input.req-name-input') })
+    .locator('.req-head .actions').getByRole('button', { name: '保存', exact: true }).click()
   await page.waitForTimeout(400)
   check('v1 编辑保存', (await page.getByText('回归-编辑后').count()) > 0)
 
-  const editedRow = page.locator('tr', { hasText: '回归-编辑后' })
+  const editedRow = reqCard('回归-编辑后')
   await editedRow.getByRole('button', { name: '删' }).click()
   await page.waitForTimeout(300)
   // 断言必须看**可见性**：确认弹窗是常驻 DOM、只切 display，
@@ -666,9 +844,9 @@ try {
   check('v1 删除二次确认', await page.getByText('确定删除该需求吗？').isVisible())
   await page.getByRole('button', { name: '确定删除' }).click()
   await page.waitForTimeout(400)
-  // 断言必须落在表格行上：删除后会弹「已删除：回归-编辑后」的 toast，
+  // 断言必须落在卡片上：删除后会弹「已删除：回归-编辑后」的 toast，
   // 用整页文本判断会被 toast 自己命中，看起来像没删掉
-  check('v1 删除后行消失', (await page.locator('tr', { hasText: '回归-编辑后' }).count()) === 0)
+  check('v1 删除后卡片消失', (await reqCard('回归-编辑后').count()) === 0)
 
   // ===== 11b) 发版主路径：未设上线分支时要先填目标分支 =====
   // 之前的用例预置了 todo_launch_branch，恰好绕过了这条分支，「填写目标分支」的
@@ -676,7 +854,7 @@ try {
   await page.evaluate(() => localStorage.removeItem('todo_launch_branch'))
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(600)
-  const launchRow = page.locator('tr', { hasText: 'UI验证-待挂分支' })
+  const launchRow = reqCard('UI验证-待挂分支')
   await launchRow.getByRole('button', { name: '发版' }).click()
   await page.waitForTimeout(400)
   const launchDialog = page.locator('.dialog-overlay', { has: page.locator('.confirm-title', { hasText: '请填写各项目的上线目标分支' }) })
@@ -689,19 +867,23 @@ try {
   await launchDialog.locator('input[placeholder="目标分支"]').first().fill('master_launched')
   await launchDialog.getByRole('button', { name: '确认发版' }).click()
   await page.waitForTimeout(500)
+  const launchedInReleasing = reqCardIn('发版中', 'UI验证-待挂分支')
   check('填写后进入发版中',
-    ((await launchRow.locator('.status-tag').textContent()) || '').includes('发版中'))
+    (await launchedInReleasing.count()) === 1
+    && (await launchedInReleasing.getAttribute('data-status')) === 'releasing')
   await launchRow.getByRole('button', { name: '标记已发版' }).click()
   await page.waitForTimeout(400)
-  check('标记已发版',
-    ((await launchRow.locator('.status-tag').textContent()) || '').includes('已发版'),
-    (await launchRow.locator('.status-tag').textContent()) || '')
+  const launchedInReleased = reqCardIn('已发版', 'UI验证-待挂分支')
+  check('标记已发版（卡片落到已发版分组，卡片带 .released）',
+    (await launchedInReleased.count()) === 1
+    && ((await launchedInReleased.getAttribute('class')) || '').includes('released'),
+    (await launchedInReleased.getAttribute('class')) || '')
 
   const searchInput = page.getByPlaceholder('搜索需求名称、链接ID或分支名...')
   await searchInput.fill('UI验证-销售预测')
   await page.waitForTimeout(400)
-  const filtered = await page.locator('tr', { hasText: 'UI验证-销售预测' }).count()
-  const hidden = await page.locator('tr', { hasText: 'UI验证-老数据形态' }).count()
+  const filtered = await reqCard('UI验证-销售预测').count()
+  const hidden = await reqCard('UI验证-老数据形态').count()
   check('v1 搜索过滤', filtered > 0 && hidden === 0, `命中 ${filtered}，被过滤 ${hidden}`)
   // 未登记分支面板现在也有一个同名清空按钮，必须限定在页头搜索框里
   await page.locator('.header-actions .search-clear').click()
@@ -942,6 +1124,10 @@ try {
   const idxAfter = apiCalls.filter(u => u.includes('/api/git/branch-index')).length
   check('飞书不可用时「刷新分支索引」照常可用（只读本地 git，不依赖飞书）',
     idxAfter > idxBefore, `分支索引请求 ${idxBefore} → ${idxAfter}`)
+  // 必须等索引真的算完再往下：按钮文案从「刷新中...」变回「刷新分支索引」才是完成信号。
+  // 否则它晚到的完成 toast 会盖掉后面那段要读的提示（这里踩过一次，表现为断言读到"分支索引已刷新"）。
+  await page.getByRole('button', { name: '刷新分支索引' }).waitFor({ timeout: 180000 })
+  await page.waitForTimeout(300)
 
   await stubMeegleStatus({
     code: 'MEEGLE_CLI_MISSING',
@@ -1005,6 +1191,226 @@ try {
     // 不能用 fs.rmSync(recursive)：本机 Node 24 上会静默杀掉进程（见 MEMORY）
     sh(`cmd /c rmdir /s /q "${tmpRoot}"`)
   }
+
+  // ===== 18) 卡片版需求区的交互（表格 → 卡片这次改动的验收点）=====
+  // 这一段刻意换上一份**小而全**的夹具，而不是接着用上面十几段跑完剩下的真实数据：
+  // 上面那些断言验的是「真实数据下卡片渲染得对不对」，这一段验的是「卡片的交互规则」——
+  // 默认折叠口径、单条/整组折叠、排序模式与拖拽、影响面气泡、搜索强制展开。
+  // 固定夹具才能保证每条都非空（「已发版默认折叠」必须有已发版卡片才算数）。
+  const CARD_FIXTURE = [
+    // A：唯一「挂了分支、有影响面」的卡片。索引里那条分支的 ids 覆盖 B、C，所以徽标是 +2
+    { id: 'CARD-A', name: '卡片-A待发版', link: `https://project.feishu.cn/xxx/story/detail/9000000000`, status: 'pending',
+      projects: [{ name: P.main.name, branch: 'feat/卡片验证' }], syncBranches: [] },
+    { id: 'CARD-B', name: '卡片-B待发版', link: `https://project.feishu.cn/xxx/story/detail/9000000001`, status: 'pending',
+      projects: [], syncBranches: [] },
+    // C 是 new（新建）：待发版分组同时装着 pending 和 new，排序模式只折 pending 那批
+    { id: 'CARD-C', name: '卡片-C新建', link: `https://project.feishu.cn/xxx/story/detail/9000000002`, status: 'new',
+      projects: [], syncBranches: [] },
+    { id: 'CARD-D', name: '卡片-D发版中', link: '', status: 'releasing',
+      projects: [{ name: P.main.name, branch: 'feat/卡片发版中' }], syncBranches: [] },
+    { id: 'CARD-E', name: '卡片-E已发版', link: '', status: 'released',
+      projects: [], syncBranches: [], releaseTime: '2026-01-01' },
+    { id: 'CARD-F', name: '卡片-F已发版', link: '', status: 'released',
+      projects: [], syncBranches: [], releaseTime: '2026-01-02' },
+  ]
+  // 9000000000 是 CARD-A 自己的需求ID（从链接里提），另外两个落在 CARD-B / CARD-C 上，
+  // 所以两张都是「已登记 + 有链接」，气泡里应当出现 2 个可点的 a.p-item
+  const CARD_INDEX = {
+    [P.main.name]: {
+      branches: {
+        'feat/卡片验证': { ids: ['9000000000', '9000000001', '9000000002'], commits: 3, lastDate: '2026-01-01', merged: false },
+      },
+      unregistered: [],
+    },
+  }
+  await page.evaluate(({ items, index, proj }) => {
+    const t = new Date()
+    const d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+    localStorage.setItem('todo_last_remind_date', d)
+    localStorage.setItem('todo_last_branch_fetch_date', d)   // 阻止自动抓分支索引（会真的去跑 git）
+    localStorage.setItem('todo_project_names', JSON.stringify([proj]))
+    localStorage.setItem('todo_release_data', JSON.stringify(items))
+    localStorage.setItem('todo_branch_index', JSON.stringify(index))
+    // 折叠/展开是「浏览偏好」，单独存在这三个键里：清掉才验得到「默认口径」
+    localStorage.removeItem('todo_collapsed_items')
+    localStorage.removeItem('todo_expanded_released')
+    localStorage.removeItem('todo_section_expanded')
+  }, { items: CARD_FIXTURE, index: CARD_INDEX, proj: { name: P.main.name, mr: P.main.mr, localPath: P.main.localPath } })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(800)
+
+  const pendingSec = sectionOf('待发版')
+  const releasingSec = sectionOf('发版中')
+  const releasedSec = sectionOf('已发版')
+  const cardOfKey = (title, key) => sectionOf(title).locator(`.req-card[data-key="${key}"]`)
+
+  // 18a) 默认折叠口径 + 卡片头契约（.cnt / .rel-time / a.link.rid）
+  const pendingCards = await pendingSec.locator('.req-card').count()
+  check('待发版/发版中卡片默认展开（分组内没有 .collapsed）',
+    pendingCards === 3 && (await pendingSec.locator('.req-card.collapsed').count()) === 0
+    && (await releasingSec.locator('.req-card').count()) === 1
+    && (await releasingSec.locator('.req-card.collapsed').count()) === 0,
+    `待发版 ${await pendingSec.locator('.req-card.collapsed').count()}/${pendingCards} 张折叠`)
+  const releasedCards = await releasedSec.locator('.req-card.released').count()
+  check('已发版卡片默认折叠（.released.collapsed 数 == 已发版卡片数）',
+    releasedCards === 2 && (await releasedSec.locator('.req-card.released.collapsed').count()) === releasedCards,
+    `${await releasedSec.locator('.req-card.released.collapsed').count()}/${releasedCards}`)
+  check('卡片头 .cnt 摘要正确（N 分支 / 未关联分支）',
+    ((await cardOfKey('待发版', 'CARD-A').locator('.cnt').textContent()) || '').trim() === '1 分支'
+    && ((await cardOfKey('待发版', 'CARD-B').locator('.cnt').textContent()) || '').trim() === '未关联分支')
+  check('.rel-time 只长在已发版卡片上',
+    (await page.locator('.req-card.released .rel-time').count()) === releasedCards
+    && (await page.locator('.req-card:not(.released) .rel-time').count()) === 0)
+  const ridLink = cardOfKey('待发版', 'CARD-A').locator('a.link.rid')
+  check('卡片头 a.link.rid 指向需求飞书链接',
+    (await ridLink.count()) === 1
+    && (await ridLink.getAttribute('href')) === 'https://project.feishu.cn/xxx/story/detail/9000000000'
+    && ((await ridLink.textContent()) || '').includes('9000000000'))
+
+  // 18b) 单条折叠：点 .chev → .collapsed 且高度明显变小；刷新后仍然折叠（持久化）
+  const cardA = cardOfKey('待发版', 'CARD-A')
+  const hExpanded = (await cardA.boundingBox()).height
+  await cardA.locator('.chev').click()
+  await page.waitForTimeout(400)
+  const hCollapsed = (await cardA.boundingBox()).height
+  check('点卡片头 .chev 折叠该卡片（出现 .collapsed 且高度明显变小）',
+    ((await cardA.getAttribute('class')) || '').includes('collapsed') && hCollapsed < hExpanded * 0.6,
+    `高度 ${Math.round(hExpanded)} → ${Math.round(hCollapsed)}`)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(800)
+  check('单条折叠刷新后仍保持（折叠状态持久化）',
+    ((await cardOfKey('待发版', 'CARD-A').getAttribute('class')) || '').includes('collapsed'))
+
+  // 18c) 分组头的「卡片折叠」/「卡片展开」只作用于本组
+  await pendingSec.getByRole('button', { name: '卡片折叠' }).click()
+  await page.waitForTimeout(400)
+  check('分组头「卡片折叠」把本组卡片全部折起',
+    (await pendingSec.locator('.req-card.collapsed').count()) === pendingCards,
+    `${await pendingSec.locator('.req-card.collapsed').count()}/${pendingCards}`)
+  check('分组头的折叠只作用于本组（发版中卡片没被折起）',
+    (await releasingSec.locator('.req-card.collapsed').count()) === 0)
+  check('已发版分组默认是收起的（.collapse-body 没有 .expanded）',
+    (await releasedSec.locator('.collapse-body.expanded').count()) === 0)
+  await releasedSec.getByRole('button', { name: '卡片展开' }).click()
+  await page.waitForTimeout(400)
+  check('对已发版点「卡片展开」：顺带把分组打开，且本组 0 张折叠',
+    (await releasedSec.locator('.collapse-body.expanded').count()) === 1
+    && (await releasedSec.locator('.req-card.collapsed').count()) === 0,
+    `分组展开 ${await releasedSec.locator('.collapse-body.expanded').count()}，仍折叠 ${await releasedSec.locator('.req-card.collapsed').count()}`)
+  await pendingSec.getByRole('button', { name: '卡片展开' }).click()
+  await page.waitForTimeout(400)
+  check('分组头「卡片展开」把本组卡片全部展开',
+    (await pendingSec.locator('.req-card.collapsed').count()) === 0)
+
+  // 18d) 「排序」按钮只在待发版分组头（exact 才能把「完成排序」排除掉）
+  check('「排序」按钮只出现在待发版分组头',
+    (await page.getByRole('button', { name: '排序', exact: true }).count()) === 1
+    && (await pendingSec.getByRole('button', { name: '排序', exact: true }).count()) === 1
+    && (await releasingSec.getByRole('button', { name: '排序', exact: true }).count()) === 0
+    && (await releasedSec.getByRole('button', { name: '排序', exact: true }).count()) === 0)
+
+  // 18e) 排序模式：点「排序」→ 卡片折起 + .grip 出现 + 提示条；拖拽改顺序；「完成排序」→ .grip 消失
+  await pendingSec.getByRole('button', { name: '排序', exact: true }).click()
+  await page.waitForTimeout(400)
+  check('排序模式提示条 .sort-bar 只在待发版出现',
+    (await page.locator('.sort-bar').count()) === 1 && (await pendingSec.locator('.sort-bar').count()) === 1)
+  const groupCards = await pendingSec.locator('.req-card').count()
+  const pendingOnly = await pendingSec.locator('.req-card.pending').count()
+  // 排序模式的口径是「整个待发版分组」：pending 与 new 一起折起（手柄本来也是全组渲染的）
+  check('进入排序模式后待发版分组卡片全部折起（pending + new 一视同仁）',
+    groupCards >= 3 && (await pendingSec.locator('.req-card.collapsed').count()) === groupCards
+    && pendingOnly >= 2 && (await pendingSec.locator('.req-card.pending.collapsed').count()) === pendingOnly,
+    `分组 ${await pendingSec.locator('.req-card.collapsed').count()}/${groupCards}，pending ${await pendingSec.locator('.req-card.pending.collapsed').count()}/${pendingOnly}`)
+  const gripCount = await pendingSec.locator('.req-card .grip').count()
+  check('排序模式下本组每张卡片都出现 .grip 且可见',
+    gripCount > 0 && gripCount === (await pendingSec.locator('.req-card').count())
+    && (await pendingSec.locator('.grip').first().isVisible()),
+    `${gripCount} 个手柄`)
+  const keysBefore = await pendingSec.locator('.card-grid .req-card').evaluateAll(els => els.map(e => e.dataset.key))
+  // 落点必须落在目标卡片内部：排序模式下卡片是折起的、只有 ~40px 高，
+  // y 一旦超出卡片，落点会跑到 .card-grid 上（Playwright 报 intercepts pointer events）。
+  // 落点语义：目标卡片上半区 = 插到它前面，下半区 = 插到它后面（见 onCardDrop 的 after）。
+  // 所以「把第 1 张拖到第 2 张上」必须落在第 2 张的下半区，落上半区是原地不动（那是正确行为）。
+  const dropBox = await cardOfKey('待发版', 'CARD-B').boundingBox()
+  await cardOfKey('待发版', 'CARD-A').locator('.grip').dragTo(
+    cardOfKey('待发版', 'CARD-B'),
+    { targetPosition: { x: 200, y: Math.round(dropBox.height * 0.75) } },
+  )
+  await page.waitForTimeout(700)
+  const keysAfter = await pendingSec.locator('.card-grid .req-card').evaluateAll(els => els.map(e => e.dataset.key))
+  const lsOrder = await page.evaluate(() => JSON.parse(localStorage.getItem('todo_release_data') || '[]').map(i => i.id))
+  check('拖拽卡片改变顺序（data-key 顺序变化，且落盘顺序一致）',
+    keysBefore.join(',') === 'CARD-A,CARD-B,CARD-C'
+    && keysAfter.join(',') === 'CARD-B,CARD-A,CARD-C'
+    && lsOrder.slice(0, 3).join(',') === keysAfter.join(','),
+    `${keysBefore.join(',')} → ${keysAfter.join(',')}；落盘 ${lsOrder.slice(0, 3).join(',')}`)
+  // new 状态的卡片同样要能拖：手柄是「待发版分组」全组渲染的，口径不统一就会出现
+  // 「有手柄但拖了没反应」的静默失效（这正是一条改卡片时踩过的坑）
+  const dropBoxNew = await cardOfKey('待发版', 'CARD-B').boundingBox()
+  await cardOfKey('待发版', 'CARD-C').locator('.grip').dragTo(
+    cardOfKey('待发版', 'CARD-B'),
+    { targetPosition: { x: 200, y: Math.round(dropBoxNew.height * 0.75) } },
+  )
+  await page.waitForTimeout(700)
+  const keysAfterNew = await pendingSec.locator('.card-grid .req-card').evaluateAll(els => els.map(e => e.dataset.key))
+  const lsOrderNew = await page.evaluate(() => JSON.parse(localStorage.getItem('todo_release_data') || '[]').map(i => i.id))
+  check('new 状态的卡片同样能拖动（排序口径统一到整个待发版分组）',
+    keysAfterNew.join(',') === 'CARD-B,CARD-C,CARD-A'
+    && lsOrderNew.slice(0, 3).join(',') === keysAfterNew.join(','),
+    `${keysAfter.join(',')} → ${keysAfterNew.join(',')}；落盘 ${lsOrderNew.slice(0, 3).join(',')}`)
+  await pendingSec.getByRole('button', { name: '完成排序', exact: true }).click()
+  await page.waitForTimeout(400)
+  check('点「完成排序」后 .grip 与排序提示条都消失',
+    (await pendingSec.locator('.grip').count()) === 0 && (await page.locator('.sort-bar').count()) === 0)
+
+  // 18f) 影响面徽标 → 悬浮出气泡（.imp 只有展开态才看得见，先展开本组）
+  await pendingSec.getByRole('button', { name: '卡片展开' }).click()
+  await page.waitForTimeout(400)
+  const impBadge = cardOfKey('待发版', 'CARD-A').locator('.imp')
+  const badgeText = ((await impBadge.textContent()) || '').trim()
+  const badgeN = Number(badgeText.replace('+', ''))
+  check('影响面徽标：覆盖 2 个需求 → 文案 +2 且是实心 .imp.solid',
+    badgeN === 2 && ((await impBadge.getAttribute('class')) || '').includes('solid'),
+    `${badgeText} / ${await impBadge.getAttribute('class')}`)
+  const impactPop = page.locator('#impactPop')
+  check('气泡初始是藏起来的（否则下面的「可见」断言就是空断言）',
+    !(await impactPop.isVisible()))
+  await impBadge.hover()
+  await page.waitForTimeout(400)
+  check('悬浮 .imp 弹出 #impactPop', await impactPop.isVisible())
+  const popItems = await impactPop.locator('.p-item').count()
+  const popAnchors = await impactPop.locator('a.p-item').count()
+  check('气泡里的需求行数 == 徽标数字',
+    popItems === badgeN && popAnchors === badgeN, `行 ${popItems} / 可点 ${popAnchors} / 徽标 ${badgeN}`)
+  const popHrefs = await impactPop.locator('a.p-item').evaluateAll(els => els.map(e => e.getAttribute('href')))
+  check('气泡里的链接指向被覆盖需求的飞书链接',
+    popHrefs.length === badgeN && popHrefs.every(h => /^https:\/\/project\.feishu\.cn\//.test(h)),
+    popHrefs.join(' | '))
+  await impactPop.hover()
+  await page.waitForTimeout(400)   // 收起有 180ms 延迟，这里刻意跨过它
+  check('鼠标移进气泡后不消失（里面的链接能点）', await impactPop.isVisible())
+  // (1275,5)：气泡宽 min(460px,92vw) 且 left 最多到 innerWidth-width-8，所以这个点在气泡外，
+  // 也比气泡的 top（>=8）更靠上 —— 用它制造「鼠标离开」是确定的
+  await page.mouse.move(1275, 5)
+  await page.waitForTimeout(500)
+  check('鼠标离开后气泡收起（显隐是动态的，不是常驻 DOM）', !(await impactPop.isVisible()))
+
+  // 18g) 搜索时强制展开：搜到了却看不见内容，比「记住折叠」更糟
+  await cardOfKey('待发版', 'CARD-B').locator('.chev').click()
+  await page.waitForTimeout(400)
+  check('搜索前先把 CARD-B 折起来',
+    ((await cardOfKey('待发版', 'CARD-B').getAttribute('class')) || '').includes('collapsed'))
+  await searchInput.fill('卡片-B')
+  await page.waitForTimeout(500)
+  check('搜索命中时强制展开该卡片',
+    (await cardOfKey('待发版', 'CARD-B').count()) === 1
+    && !((await cardOfKey('待发版', 'CARD-B').getAttribute('class')) || '').includes('collapsed'))
+  check('搜索把不命中的卡片滤掉（不是只隐藏）',
+    (await pendingSec.locator('.req-card').count()) === 1)
+  await searchInput.fill('')
+  await page.waitForTimeout(500)
+  check('清空搜索后折叠口径原样恢复（搜索没改掉折叠状态）',
+    ((await cardOfKey('待发版', 'CARD-B').getAttribute('class')) || '').includes('collapsed'))
 
   // toDo.json 不存在时的 404 是 v1 既有正常分支（loadFromJsonFile 会静默回退 localStorage）；
   // favicon 缺失与功能无关。除这两者外出现 4xx/5xx 都算回归。
