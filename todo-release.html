@@ -286,7 +286,7 @@
               </template>
 
               <template v-else>
-                <span class="req-name">{{item.name}}</span>
+                <span class="req-name" title="点击展开/折叠" @click="toggleItemCollapse(item)">{{item.name}}</span>
                 <a v-if="item.link" class="link rid" :href="item.link" target="_blank" :title="item.link">{{ selfWorkItemId(item) || '详情' }}<span class="link-arrow">↗</span></a>
                 <span class="cnt" :class="{wide:isWideItem(item)}" :title="isWideItem(item)?wideItemTitle(item):''">{{ isWideItem(item) ? '⚠ ' : '' }}{{ branchCountLabel(item) }}</span>
                 <span v-if="section.key==='released'" class="rel-time">发版时间 {{item.releaseTime||'—'}}</span>

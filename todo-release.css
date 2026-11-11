@@ -1832,7 +1832,7 @@ tbody tr:hover td.col-actions { background: var(--surface-hover); }
 
 .req-head { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-light); }
 .req-card.collapsed .req-head { border-bottom: none; }
-.req-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 550; }
+.req-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 550; cursor: pointer; }
 /* 折叠态只剩一行摘要：名字必须截断成省略号，否则长名字会在 ID 链接前面折行、摘要变两行 */
 .req-card.collapsed .req-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 编辑态两个输入框：应用原有的 input.inline-input 是 width:100%（特异性 0,1,1），会压过我这里的

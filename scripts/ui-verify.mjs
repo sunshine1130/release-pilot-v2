@@ -320,8 +320,24 @@ try {
   const chips = row4.locator('.branch-suggest')
   await chips.first().waitFor({ timeout: 30000 })
   const chipText = (await chips.first().textContent() || '').trim()
+  // 建议的主分支随真实仓库演变：同一需求ID可被多条分支的提交覆盖（11-11 实测新的
+  // feat/7075421133 分支顶掉了融合分支），规则是 L1 优先、同级取独占提交更少者 ——
+  // 期望从实际索引按同一规则复算，不写死具体分支名
+  const expectedChip = await page.evaluate(({ proj, req }) => {
+    const idx = JSON.parse(localStorage.getItem('todo_branch_index') || '{}')
+    const re = new RegExp('(^|[^0-9])' + req + '([^0-9]|$)')
+    const cands = []
+    for (const [b, info] of Object.entries((idx[proj] || {}).branches || {})) {
+      if (info.merged) continue
+      const commits = info.commits || 0
+      if ((info.ids || []).includes(req)) cands.push({ b, via: 0, commits })
+      if (re.test(b)) cands.push({ b, via: 1, commits })
+    }
+    cands.sort((x, y) => x.via - y.via || x.commits - y.commits)
+    return cands.length ? cands[0].b : ''
+  }, { proj: P.main.name, req: R.noBranchId })
   check('需求卡片显示自动匹配的建议分支',
-    chipText.includes(P.main.name) && chipText.includes(B.fusion), chipText)
+    !!expectedChip && chipText.includes(P.main.name) && chipText.includes(expectedChip), chipText)
   check('已手工挂过的分支不再重复建议',
     (await page.locator('.req-card', { hasText: 'UI验证-销售预测' }).locator('.branch-suggest').count()) === 0)
   // 截图前先把卡片滚到视口里：按 boundingBox 裁切时，卡片若在视口底部，裁出来只有几像素
@@ -346,7 +362,7 @@ try {
     const it = items.find(i => i.name === 'UI验证-待挂分支')
     return ((it && it.projects) || []).map(p => `${p.name}|${p.branch}`)
   })
-  check('采用建议后落盘', persisted.includes(`${P.main.name}|${B.fusion}`), persisted.join(' , '))
+  check('采用建议后落盘', persisted.includes(`${P.main.name}|${expectedChip}`), persisted.join(' , '))
 
   // 4c) 同一项目已经挂了别的分支时，建议必须**追加一行**而不是要求用户自己去切换：
   //     一条需求的代码同时落在同仓库两条分支上是真实形态（融合分支 merge 了按需求命名的分支）
@@ -473,18 +489,20 @@ try {
   }
 
   await page.evaluate(
-    ({ cfg, branchId, proj }) => {
+    ({ cfg, ids, proj }) => {
       localStorage.setItem('todo_meegle_config', JSON.stringify(cfg))
-      // 合成一条覆盖某真实需求的跨需求分支，让「自动挂分支」这条链路可以被确定性断言
-      // （真实索引里符合条件的分支不在飞书列表第一页）
+      // 合成一条覆盖真实需求的跨需求分支，让「自动挂分支」这条链路可以被确定性断言
+      // （真实索引里符合条件的分支不在飞书列表第一页）。
+      // 覆盖全部夹具ID而不是单一ID：飞书列表一直在滚动，单个夹具ID一旦换状态或被挤下
+      // 前两页断言就红（11-11 实测 7153729281 移出预览）；只要其中任意一条还在预览里，链路就可断言
       const idx = JSON.parse(localStorage.getItem('todo_branch_index') || '{}')
       idx[proj] = idx[proj] || { branches: {}, unregistered: [] }
       idx[proj].branches['feat/测试-跨需求分支'] = {
-        ids: [branchId], commits: 2, lastDate: '2026-11-03', merged: false,
+        ids, commits: 2, lastDate: '2026-11-03', merged: false,
       }
       localStorage.setItem('todo_branch_index', JSON.stringify(idx))
     },
-    { cfg: MEEGLE_CONFIG, branchId: R.l1Matched, proj: P.main.name },
+    { cfg: MEEGLE_CONFIG, ids: [R.l1Matched, R.existingImported, R.withManualBranch, R.legacyNoSource, R.noBranchId, R.pmsBranchOwning], proj: P.main.name },
   )
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(500)
@@ -545,7 +563,7 @@ try {
   await page.waitForTimeout(200)
   check('再次点击分组头展开', (await previewBox.locator('.sync-row').count()) === rowsBeforeCollapse)
 
-  const l1 = await previewBox.locator('.sync-row', { hasText: R.l1Matched }).locator('.sync-branch.via-L1').count()
+  const l1 = await previewBox.locator('.sync-branch.via-L1', { hasText: 'feat/测试-跨需求分支' }).count()
   check('按需求ID自动匹配到分支（L1）', l1 > 0)
   await page.screenshot({ path: path.join(PROJECT_DIR, 'docs', 'ui-verify-sync.png'), fullPage: false })
 
