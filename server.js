@@ -749,7 +749,9 @@ function oneMonthAgoStr() {
 
 async function handleGitUser(req, res) {
   try {
-    const out = await execFileAsync('git', ['config', 'user.name'], { encoding: 'utf8', windowsHide: true })
+    // 必须读全局：本仓库可能用个人账号做了 local 覆盖（例如 GitHub 个人项目），
+    // 而「只看我的分支」过滤的是公司业务仓库，其提交作者应与全局 user.name 一致。
+    const out = await execFileAsync('git', ['config', '--global', 'user.name'], { encoding: 'utf8', windowsHide: true })
     json(res, { user: out.stdout.trim() })
   } catch {
     json(res, { user: null, error: '无法获取git用户名' })
@@ -853,6 +855,32 @@ async function handleRemoteBranches(req, res, query) {
   }
 }
 
+async function handleBranchExists(req, res, query) {
+  const repo = query.get('repo')
+  const localPath = query.get('path')
+  const branch = (query.get('branch') || '').trim()
+
+  if (!branch) return fail(res, 'BAD_REQUEST', '缺少 branch 参数')
+  if (/[*?[]/.test(branch)) return fail(res, 'BAD_REQUEST', 'branch 不能包含 *、? 或 [')
+  if (!repo && !localPath) return fail(res, 'BAD_REQUEST', '需要 repo 或 path 参数之一')
+
+  const target = repo ? normalizeRepoUrl(repo) : ''
+  if (repo && !target) return fail(res, 'GIT_REPO_INVALID', 'repo 必须是 http(s):// 开头的仓库地址')
+
+  try {
+    const names = await listRemoteBranches(target, `refs/heads/${branch}`, localPath)
+    json(res, {
+      exists: names.some(name => name === branch),
+      branch,
+      repo: target,
+      source: 'ls-remote',
+      checkedAt: Date.now(),
+    })
+  } catch (err) {
+    fail(res, err.code || 'GIT_FAILED', err.message || '检测远端分支失败', err.code === 'GIT_TIMEOUT' ? 504 : 400)
+  }
+}
+
 async function handleBranchIndex(req, res, query) {
   const localPath = query.get('path')
   if (!localPath) return fail(res, 'BAD_REQUEST', '缺少 path 参数')
@@ -937,7 +965,7 @@ async function handleVersion(req, res) {
   try {
     const v = await readGitVersion(BASE_DIR)
     const status = await runGit(['status', '--porcelain'], BASE_DIR)
-    json(res, { ...v, dirty: status.trim().length > 0 })
+    json(res, { ...v, dirty: status.trim().length > 0, pid: process.pid })
   } catch (err) {
     fail(res, 'VERSION_FAILED', `读取版本失败：${err.message}`, 500)
   }
@@ -1152,6 +1180,28 @@ async function handleBackupRead(req, res, query) {
   }
 }
 
+/**
+ * 浏览器一次点击通常只放行第一个 window.open，其余新建分支页会被拦截。
+ * 由本机引擎补开这些明确的 http(s) 地址；execFile 数组传参，不经过 shell，URL 里的 & 不会变成命令。
+ */
+async function handleOpenExternal(req, res) {
+  const body = await readJsonBody(req, 16 * 1024)
+  const target = String(body?.url || '').trim()
+  if (!/^https?:\/\//i.test(target)) return fail(res, 'BAD_REQUEST', '只允许打开 http(s) 地址')
+  try {
+    if (process.platform === 'win32') {
+      execFile('rundll32.exe', ['url.dll,FileProtocolHandler', target], () => {})
+    } else if (process.platform === 'darwin') {
+      execFile('open', [target], () => {})
+    } else {
+      execFile('xdg-open', [target], () => {})
+    }
+    json(res, { ok: true })
+  } catch (err) {
+    fail(res, 'OPEN_EXTERNAL_FAILED', `打开系统浏览器失败：${err.message}`, 500)
+  }
+}
+
 /** 在资源管理器里打开备份目录，省得用户照着手敲路径 */
 async function handleBackupReveal(req, res) {
   try {
@@ -1176,6 +1226,7 @@ const ROUTES = {
   'GET /api/git-user': handleGitUser,
   'GET /api/branches': handleLocalBranches,
   'GET /api/git/branches': handleRemoteBranches,
+  'GET /api/git/branch-exists': handleBranchExists,
   'GET /api/git/branch-index': handleBranchIndex,
   'GET /api/meegle/status': handleMeegleStatus,
   'GET /api/meegle/spaces': handleMeegleSpaces,
@@ -1186,6 +1237,7 @@ const ROUTES = {
   'GET /api/backup/read': handleBackupRead,
   'POST /api/backup/delete': handleBackupDelete,
   'POST /api/backup/reveal': handleBackupReveal,
+  'POST /api/system/open-external': handleOpenExternal,
   'GET /api/version': handleVersion,
   'GET /api/update/check': handleUpdateCheck,
   'POST /api/update/apply': handleUpdateApply,

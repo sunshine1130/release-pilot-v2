@@ -3,741 +3,376 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>需求发版管理 - 使用说明</title>
+<title>发版小助手 · 使用指南</title>
 <style>
 :root {
-  --bg: #f5f7fa;
-  --surface: #ffffff;
-  --surface-raised: #fafbfc;
-  --border: #e5e7eb;
-  --border-light: #f0f1f3;
-  --text: #1f2937;
-  --text-secondary: #4b5563;
-  --text-muted: #9ca3af;
-  --accent: #2563eb;
-  --accent-bg: rgba(37,99,235,0.08);
-  --success: #10b981;
-  --success-bg: rgba(16,185,129,0.08);
-  --warning: #f59e0b;
-  --warning-bg: rgba(245,158,11,0.08);
-  --danger: #ef4444;
-  --danger-bg: rgba(239,68,68,0.08);
-  --purple: #8b5cf6;
-  --purple-bg: rgba(139,92,246,0.08);
-  --radius: 10px;
-  --radius-sm: 6px;
-  --radius-lg: 12px;
-  --mono: Consolas,'Fira Code',monospace;
+  --bg:#f4f6fa; --surface:#fff; --raised:#f8fafc; --text:#172033; --secondary:#526077;
+  --muted:#8a96a8; --border:#e3e8f0; --accent:#2563eb; --accent-bg:#eaf1ff;
+  --purple:#7c3aed; --purple-bg:#f1ebff; --success:#059669; --success-bg:#e8f8f1;
+  --warning:#b45309; --warning-bg:#fff5df; --danger:#dc2626; --danger-bg:#fff0f0;
+  --mono:Consolas,'SFMono-Regular','Fira Code',monospace; --shadow:0 8px 26px rgba(28,39,64,.06);
 }
-* { margin:0; padding:0; box-sizing:border-box; }
-body {
-  font-family: -apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Roboto,sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.8;
-  padding: 40px 20px 80px;
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; scroll-padding-top:24px; }
+body { margin:0; background:var(--bg); color:var(--text); font:14px/1.75 -apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif; }
+a { color:var(--accent); }
+code { padding:2px 6px; border:1px solid var(--border); border-radius:5px; background:var(--raised); color:var(--accent); font:12px var(--mono); }
+kbd { padding:1px 6px; border:1px solid var(--border); border-bottom-width:2px; border-radius:5px; background:#fff; font:11px var(--mono); }
+.hero { background:linear-gradient(135deg,#172554 0%,#1d4ed8 58%,#6d28d9 100%); color:#fff; }
+.hero-inner { max-width:1240px; margin:auto; padding:34px 28px 38px; }
+.eyebrow { margin:0 0 5px; color:#bfdbfe; font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; }
+h1 { margin:0; font-size:29px; line-height:1.35; letter-spacing:-.02em; }
+.hero p { max-width:760px; margin:10px 0 18px; color:#dbeafe; }
+.hero-actions { display:flex; gap:10px; flex-wrap:wrap; }
+.hero-actions a { padding:7px 14px; border:1px solid rgba(255,255,255,.35); border-radius:8px; color:#fff; text-decoration:none; font-weight:600; font-size:12px; }
+.hero-actions a.primary { border-color:#fff; background:#fff; color:#1d4ed8; }
+.doc-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:26px; max-width:1240px; margin:28px auto 70px; padding:0 28px; }
+.toc { position:sticky; top:20px; align-self:start; max-height:calc(100vh - 40px); overflow:auto; padding:14px 12px; border:1px solid var(--border); border-radius:12px; background:var(--surface); box-shadow:var(--shadow); }
+.toc-title { padding:3px 10px 8px; color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.08em; }
+.toc-group { margin:8px 0 2px; padding:8px 10px 2px; border-top:1px solid var(--border); color:var(--muted); font-size:10px; }
+.toc a { display:flex; align-items:center; gap:8px; margin:2px 0; padding:6px 10px; border-radius:7px; color:var(--secondary); text-decoration:none; font-size:12px; }
+.toc a::before { content:''; width:4px; height:4px; flex:0 0 4px; border-radius:50%; background:#c5cdd9; }
+.toc a:hover { background:var(--raised); color:var(--accent); }
+.toc a.active { background:var(--accent-bg); color:var(--accent); font-weight:700; }
+.toc a.active::before { background:var(--accent); }
+.content { min-width:0; }
+.doc-section { margin-bottom:22px; padding:24px 26px; scroll-margin-top:24px; border:1px solid var(--border); border-radius:14px; background:var(--surface); box-shadow:var(--shadow); }
+.section-head { display:flex; align-items:flex-start; gap:12px; margin-bottom:18px; }
+.section-no { display:inline-flex; align-items:center; justify-content:center; flex:0 0 30px; height:30px; border-radius:9px; background:var(--accent-bg); color:var(--accent); font:700 12px var(--mono); }
+h2 { margin:0; font-size:20px; line-height:1.5; }
+.section-sub { margin:2px 0 0; color:var(--muted); font-size:12px; }
+h3 { margin:22px 0 8px; font-size:15px; }
+h3:first-child { margin-top:0; }
+p { margin:8px 0; color:var(--secondary); }
+ul,ol { margin:8px 0; padding-left:22px; color:var(--secondary); }
+li { margin:5px 0; }
+strong { color:var(--text); }
+.guide-flow { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.flow-step { position:relative; padding:14px; border:1px solid #dbe5f3; border-radius:10px; background:var(--raised); }
+.flow-step b { display:block; margin-bottom:4px; color:var(--accent); font-size:12px; }
+.flow-step span { color:var(--secondary); font-size:12px; }
+.page-map { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:12px; }
+.map-item { display:flex; gap:10px; padding:11px 12px; border:1px solid var(--border); border-radius:9px; text-decoration:none; }
+.map-item:hover { border-color:#a9c3f7; background:var(--accent-bg); }
+.map-no { flex:0 0 24px; color:var(--accent); font:700 11px var(--mono); }
+.map-item b { display:block; font-size:12px; }
+.map-item small { display:block; color:var(--muted); font-size:11px; line-height:1.5; }
+.note { margin:12px 0; padding:11px 14px; border-left:3px solid #f59e0b; border-radius:7px; background:var(--warning-bg); color:#854d0e; font-size:12px; }
+.note.info { border-left-color:var(--accent); background:var(--accent-bg); color:#1e40af; }
+.note.safe { border-left-color:var(--success); background:var(--success-bg); color:#065f46; }
+.grid-2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.mini-card { padding:13px 15px; border:1px solid var(--border); border-radius:9px; background:var(--raised); }
+.mini-card h3 { margin:0 0 5px; font-size:13px; }
+.mini-card p { margin:0; font-size:12px; }
+.table-wrap { margin:10px 0; overflow-x:auto; border:1px solid var(--border); border-radius:9px; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th,td { padding:8px 11px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+tr:last-child td { border-bottom:none; }
+th { background:var(--raised); color:var(--text); font-weight:700; white-space:nowrap; }
+.tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:10px; font-weight:700; white-space:nowrap; }
+.tag-new { background:var(--accent-bg); color:var(--accent); }
+.tag-pending { background:var(--warning-bg); color:var(--warning); }
+.tag-releasing { background:var(--purple-bg); color:var(--purple); }
+.tag-released,.tag-ok { background:var(--success-bg); color:var(--success); }
+.status-line { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin:10px 0; }
+.qa-list { border-top:1px solid var(--border); }
+details { border-bottom:1px solid var(--border); }
+summary { position:relative; padding:13px 30px 13px 2px; cursor:pointer; color:var(--text); font-weight:600; list-style:none; }
+summary::-webkit-details-marker { display:none; }
+summary::after { content:'＋'; position:absolute; right:6px; top:11px; color:var(--muted); font-size:16px; }
+details[open] summary { color:var(--accent); }
+details[open] summary::after { content:'−'; }
+.qa-answer { padding:0 12px 13px 2px; color:var(--secondary); font-size:12px; }
+.qa-answer p:first-child { margin-top:0; }
+.footer { padding:12px; color:var(--muted); text-align:center; font-size:11px; }
+@media (max-width:900px) {
+  html { scroll-padding-top:112px; }
+  .doc-layout { display:block; margin-top:14px; padding:0 16px; }
+  .toc { top:0; z-index:10; display:flex; gap:3px; max-height:none; margin-bottom:14px; padding:7px; overflow-x:auto; border-radius:9px; white-space:nowrap; }
+  .toc-title,.toc-group { display:none; }
+  .toc a { flex:0 0 auto; padding:5px 9px; }
+  .doc-section { scroll-margin-top:112px; padding:20px; }
+  .guide-flow { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
-.container { max-width: 900px; margin:0 auto; }
-h1 {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+@media (max-width:560px) {
+  .hero-inner { padding:26px 18px 30px; }
+  h1 { font-size:24px; }
+  .guide-flow,.page-map,.grid-2 { grid-template-columns:1fr; }
+  .doc-section { padding:17px 15px; }
 }
-h1::before {
-  content: '';
-  width: 4px;
-  height: 24px;
-  background: linear-gradient(180deg, var(--accent) 0%, var(--purple) 100%);
-  border-radius: 2px;
-}
-h2 {
-  font-size: 20px;
-  font-weight: 650;
-  margin: 32px 0 12px;
-  padding-bottom: 6px;
-  border-bottom: 2px solid var(--border);
-  color: var(--accent);
-}
-h3 {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 20px 0 8px;
-  color: var(--text-secondary);
-}
-p { margin: 8px 0; color: var(--text-secondary); }
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px 24px;
-  margin: 16px 0;
-}
-.card p:first-child { margin-top: 0; }
-.card p:last-child { margin-bottom: 0; }
-ul, ol { margin: 8px 0 8px 24px; color: var(--text-secondary); }
-li { margin: 4px 0; }
-code {
-  background: var(--surface-raised);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  padding: 2px 6px;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--accent);
-}
-kbd {
-  display: inline-block;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 1px 6px;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-  box-shadow: 0 1px 0 var(--border);
-}
-.tag {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 14px;
-  font-size: 11px;
-  font-weight: 600;
-  margin: 0 2px;
-}
-.tag-new { background: var(--accent-bg); color: var(--accent); }
-.tag-pending { background: var(--warning-bg); color: var(--warning); }
-.tag-releasing { background: var(--purple-bg); color: var(--purple); }
-.tag-released { background: var(--success-bg); color: var(--success); }
-.note {
-  background: var(--warning-bg);
-  border: 1px solid rgba(245,158,11,0.2);
-  border-radius: var(--radius);
-  padding: 12px 16px;
-  margin: 12px 0;
-  font-size: 14px;
-  color: #92400e;
-}
-.table-demo {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0;
-  font-size: 13px;
-}
-.table-demo th, .table-demo td {
-  border: 1px solid var(--border);
-  padding: 6px 10px;
-  text-align: left;
-}
-.table-demo th {
-  background: var(--surface-raised);
-  font-weight: 600;
-  color: var(--text);
-}
-.sep { border-top: 1px solid var(--border-light); margin: 20px 0; }
 </style>
 </head>
 <body>
-<div class="container">
+<header class="hero">
+  <div class="hero-inner">
+    <div class="eyebrow">RELEASE ASSISTANT · USER GUIDE</div>
+    <h1>发版小助手使用指南</h1>
+    <p>从需求登记、批量流转、上线分支检查到创建 MR，按页面顺序带你完成一次发版。左侧导航可按模块直接跳转。</p>
+    <div class="hero-actions">
+      <a class="primary" href="#quickstart">开始操作总览</a>
+      <a href="./todo-release.html">返回发版小助手</a>
+      <a href="#qa">查看基础 QA</a>
+    </div>
+  </div>
+</header>
 
-<h1>需求发版管理 - 使用说明</h1>
-<p>一个前端版本发布流程管理工具，帮助团队跟踪需求的发版状态、管理项目分支、快速跳转创建 MR。</p>
+<div class="doc-layout">
+  <nav class="toc" aria-label="使用指南导航">
+    <div class="toc-title">使用指南</div>
+    <a href="#quickstart" class="active">操作总览</a>
+    <div class="toc-group">基础</div>
+    <a href="#setup">启动与数据</a>
+    <a href="#projects">项目管理</a>
+    <a href="#requirements">需求管理</a>
+    <div class="toc-group">发版操作</div>
+    <a href="#release">发版与上线分支</a>
+    <a href="#branches">分支查询与索引</a>
+    <a href="#unregistered">未登记分支</a>
+    <a href="#sync">飞书项目同步</a>
+    <div class="toc-group">数据与帮助</div>
+    <a href="#backup">备份与导入导出</a>
+    <a href="#shortcuts">快捷键</a>
+    <a href="#qa">基础 QA</a>
+  </nav>
 
-<!-- ===== 快速开始 ===== -->
-<h2>一、快速开始</h2>
+  <main class="content">
+    <section class="doc-section" id="quickstart">
+      <div class="section-head"><span class="section-no">01</span><div><h2>操作总览</h2><p class="section-sub">先知道页面每块是干什么的，再照着流程走一遍。</p></div></div>
+      <div class="note info"><strong>想找逐步高亮真实控件的 Guide？</strong>请回到主页面，点标题旁的「页面 Guide」。这里保留的是分模块操作总览。</div>
+      <h3>当前页面，从上到下这样看</h3>
+      <div class="page-map">
+        <a class="map-item" href="#setup"><span class="map-no">01</span><span><b>页头与工具条</b><small>搜索、备份、分支索引、飞书同步、新增需求和版本更新。</small></span></a>
+        <a class="map-item" href="#projects"><span class="map-no">02</span><span><b>项目管理</b><small>维护项目、MR 地址、本地路径、公共上线分支，以及单项目 MR / NB。</small></span></a>
+        <a class="map-item" href="#unregistered"><span class="map-no">03</span><span><b>未登记分支</b><small>检查有提交但查不到需求登记的分支，避免漏发。</small></span></a>
+        <a class="map-item" href="#requirements"><span class="map-no">04</span><span><b>待发版</b><small>同时包含「新建」和「待发版」卡片，可勾选批量流转、拖拽排序。</small></span></a>
+        <a class="map-item" href="#release"><span class="map-no">05</span><span><b>发版中 + 今日上线分支</b><small>查看发版项目、当天分支状态和实际 MR 源分支，批量打开 NB。</small></span></a>
+        <a class="map-item" href="#requirements"><span class="map-no">06</span><span><b>已发版</b><small>保留发版完成记录，默认收起，需要时可恢复待发版。</small></span></a>
+      </div>
 
-<div class="card">
-  <h3>文件结构</h3>
-  <table class="table-demo">
-    <tr><th style="width:180px">文件</th><th>说明</th></tr>
-    <tr><td><code>todo-release.html</code></td><td>主页面（HTML 模板）</td></tr>
-    <tr><td><code>todo-release.js</code></td><td>业务逻辑（Vue 3 组件）</td></tr>
-    <tr><td><code>todo-release.css</code></td><td>样式文件</td></tr>
-    <tr><td><code>vue.global.js</code></td><td>Vue 3 运行库</td></tr>
-    <tr><td><code>server.js</code></td><td>本地服务：静态页面 + 分支/飞书项目/备份/更新接口</td></tr>
-    <tr><td><code>toDo.json</code></td><td>数据文件（可选，优先级高于 localStorage）</td></tr>
-    <tr><td><code>更新.bat</code></td><td>一键 <code>git pull</code> 拉最新代码（引擎没起来时用）</td></tr>
-    <tr><td><code>backup/</code></td><td>「备份」按钮写出的数据备份（自动创建）</td></tr>
-    <tr><td><code>docs/</code></td><td>技术方案与接口/算法/数据模型文档</td></tr>
-    <tr><td><code>scripts/ui-verify.mjs</code></td><td>浏览器端自动化验证脚本（可选）</td></tr>
-    <tr><td><code>scripts/v1-migrate-verify.mjs</code></td><td>v1→v2 迁移路径的浏览器验证：老数据自动可见、老导出文件可导入（可选）</td></tr>
-  </table>
-  <p style="margin-top:12px">双击 <code>start-server.bat</code> 启动服务并自动打开页面（端口被占用时会顺延，页面会自动跟随）。无需构建工具。</p>
+      <h3>一次完整的日常发版</h3>
+      <div class="guide-flow">
+        <div class="flow-step"><b>STEP 1 · 登记需求</b><span>手工新增，或从飞书项目同步。确认项目、开发分支和同发分支。</span></div>
+        <div class="flow-step"><b>STEP 2 · 批量待发版</b><span>勾选「新建」卡片，点「批量设为待发版」。</span></div>
+        <div class="flow-step"><b>STEP 3 · 开始发版</b><span>勾选「待发版」卡片，点「批量开始发版」；单条也可直接点「发版」。</span></div>
+        <div class="flow-step"><b>STEP 4 · 建上线分支</b><span>后端用批量 NB 打开当天分支页面，前端继续用 master_launched。</span></div>
+        <div class="flow-step"><b>STEP 5 · 检查并建 MR</b><span>返回后点「立即检测」，确认项目已建立，再点「打开 MR」。</span></div>
+        <div class="flow-step"><b>STEP 6 · 完成发版</b><span>GitLab 合并和实际部署完成后，再「标记已发版」或「全部发版」。</span></div>
+      </div>
+      <div class="note safe"><strong>工具边界：</strong>本工具只读取分支、打开 GitLab 页面并管理本地清单，不会替你提交 MR、合并代码或执行部署。</div>
+    </section>
+
+    <section class="doc-section" id="setup">
+      <div class="section-head"><span class="section-no">02</span><div><h2>启动与数据</h2><p class="section-sub">先保证页面地址正确，再开始维护需求。</p></div></div>
+      <div class="grid-2">
+        <div class="mini-card"><h3>启动</h3><p>双击 <code>start-server.bat</code>，默认打开 <code>http://localhost:1949</code>。无需安装前端依赖或执行构建。</p></div>
+        <div class="mini-card"><h3>更新</h3><p>每天自动检查一次，有更新时页头显示绿色「有更新」，点击即可拉取。包含引擎改动时会持续显示「重启后生效」，真正重启后自动恢复版本号。</p></div>
+      </div>
+      <h3>数据从哪里来</h3>
+      <ol>
+        <li>同目录存在 <code>toDo.json</code> 时优先加载它。</li>
+        <li>否则读取浏览器 <code>localStorage</code>，需求增改和状态流转会自动保存。</li>
+        <li>点「备份」把完整数据写入项目 <code>backup/</code>，这是防止清缓存后丢数据的推荐方式。</li>
+        <li>「导出 / 导入」适合换浏览器、换电脑或把数据交给别人。</li>
+      </ol>
+      <div class="note"><strong>换端口或换域名，数据看起来会像“丢了”。</strong>浏览器按「协议 + 主机 + 端口」隔离数据，<code>localhost</code> 与 <code>127.0.0.1</code> 不通用，1949 与 1950 也不通用。优先回到原来的地址。</div>
+      <h3>从 v1 升级</h3>
+      <p>两版使用相同默认地址和基础存储键，直接用 v2 打开 <code>http://localhost:1949</code> 通常即可看到旧需求、项目和公共上线分支。两版不要同时启动；切换前建议先在 v1 导出一次，再在 v2 点一次「备份」。</p>
+    </section>
+
+    <section class="doc-section" id="projects">
+      <div class="section-head"><span class="section-no">03</span><div><h2>项目管理</h2><p class="section-sub">项目配置决定 NB、MR、远端检测和分支索引能否使用。</p></div></div>
+      <div class="table-wrap"><table>
+        <tr><th>配置项</th><th>用途</th><th>未配置的影响</th></tr>
+        <tr><td>项目名称</td><td>需求关联项目的统一名称。</td><td>无法从项目下拉中复用。</td></tr>
+        <tr><td>MR 地址</td><td>生成项目 MR、NB 链接，并推导远端仓库地址。</td><td>不能自动打开 MR / NB，也不能按 MR 地址检测远端分支。</td></tr>
+        <tr><td>本地路径</td><td>读取本地提交历史、获取分支列表、计算需求关联和影响面。</td><td>仍可用 MR / NB；不能计算分支索引和影响面。</td></tr>
+        <tr><td>公共上线分支</td><td>保存当前固定上线分支或检测到的当天上线分支。</td><td>开始发版时会要求填写各项目目标分支。</td></tr>
+      </table></div>
+      <h3>项目标签旁的按钮</h3>
+      <ul>
+        <li><strong>MR</strong>：打开该项目的 Merge Request 页面。</li>
+        <li><strong>NB</strong>：基于 <code>master</code> 打开新建分支页，预填 <code>master_MMDD</code>。单个 NB 不会启动看板自动检测。</li>
+        <li><strong>📁</strong>：悬停查看本地路径；✏️ 编辑；× 删除项目配置。</li>
+      </ul>
+      <p>新增或编辑项目后记得保存。需求里填写项目名时，可从下拉列表直接选择已维护项目。</p>
+    </section>
+
+    <section class="doc-section" id="requirements">
+      <div class="section-head"><span class="section-no">04</span><div><h2>需求管理</h2><p class="section-sub">卡片是发版清单的基本单位，状态只通过明确操作改变。</p></div></div>
+      <h3>新增与编辑</h3>
+      <ol>
+        <li>点「+ 新增需求」，填写需求名称；需求链接可选，但建议填写，便于打开飞书详情和自动匹配。</li>
+        <li>逐行添加项目、开发分支和备注；📂 可从本地分支列表中选择。</li>
+        <li>依赖其他仓库一起上线时，添加「一同发版分支」。</li>
+        <li>保存后需求进入「新建」。新建和待发版可编辑，发版中和已发版需先恢复待发版。</li>
+      </ol>
+      <h3>状态与批量流转</h3>
+      <div class="status-line"><span class="tag tag-new">新建</span>→<span class="tag tag-pending">待发版</span>→<span class="tag tag-releasing">发版中</span>→<span class="tag tag-released">已发版</span></div>
+      <ul>
+        <li><strong>批量设为待发版</strong>：勾选新建卡片，只处理选中的新建需求。</li>
+        <li><strong>批量开始发版</strong>：勾选待发版卡片，只处理选中的待发版需求，并记录同一批发版时间。</li>
+        <li>混合勾选时，按钮分别显示可处理数量；没有公共上线分支时，会先要求补齐目标分支。</li>
+      </ul>
+      <h3>卡片与清单</h3>
+      <ul>
+        <li>点需求名称或左侧箭头折叠单卡；「卡片展开 / 卡片折叠」只作用于当前分组。</li>
+        <li>「待发版」分组同时包含新建和待发版卡片；只有这一组支持拖拽排序，拖动 <code>⠿</code> 手柄。</li>
+        <li>搜索匹配需求名称、链接和分支名；搜索时卡片自动展开，清空后恢复原折叠状态。</li>
+        <li>点分支名会复制分支并打开新建 MR 页；📝 查看或编辑 SQL、DDL、注意事项等备注。</li>
+        <li>影响面徽标表示该分支还覆盖其他需求，悬停可查看并打开对应需求详情。</li>
+      </ul>
+    </section>
+
+    <section class="doc-section" id="release">
+      <div class="section-head"><span class="section-no">05</span><div><h2>发版与今日上线分支</h2><p class="section-sub">看板回答三件事：今天发哪些项目、哪些分支已存在、每个 MR 会从哪条分支创建。</p></div></div>
+      <h3>今日上线分支看板</h3>
+      <div class="table-wrap"><table>
+        <tr><th>状态</th><th>含义</th><th>你该怎么做</th></tr>
+        <tr><td><span class="tag">未检测</span></td><td>还没有查询过远端，不代表分支不存在。</td><td>点「立即检测」。</td></tr>
+        <tr><td><span class="tag">检测中</span></td><td>正在通过 <code>git ls-remote</code> 查询。</td><td>等待本轮完成。</td></tr>
+        <tr><td><span class="tag tag-ok">已建立</span></td><td>该项目远端真实存在当天分支。</td><td>确认 MR 源分支后打开 MR。</td></tr>
+        <tr><td><span class="tag tag-pending">未建立</span></td><td>本轮远端没有找到当天分支。</td><td>打开 NB 建立，或确认是否用了别的分支名。</td></tr>
+        <tr><td><span class="tag" style="background:var(--danger-bg);color:var(--danger)">检测失败</span></td><td>仓库地址、网络或凭据异常，不等于未建立。</td><td>查看错误原因，处理后重试。</td></tr>
+      </table></div>
+      <h3>批量建立当天分支</h3>
+      <ol>
+        <li>点「批量建立当日上线分支」，弹窗会按项目去重，统一预填 <code>master_MMDD</code>。</li>
+        <li>点「打开全部新建分支页面」。浏览器允许的页面直接打开；被拦截的项目由本机引擎调系统默认浏览器补开。</li>
+        <li>你仍需在每个 GitLab 页面确认创建，本工具不会直接创建远端分支。</li>
+        <li>返回发版小助手会自动补检，也可点「立即检测」。自动检测最长持续 10 分钟，全部已建立会提前停止。</li>
+      </ol>
+      <div class="note info"><strong>每次检测都会重新查询全部项目。</strong>远端分支被删除后，再点「立即检测」会从「已建立」更新为「未建立」，不会沿用旧成功状态；「上次检测」可用于判断结果的新旧。</div>
+      <h3>MR 源分支如何确定</h3>
+      <ul>
+        <li>当前项目检测到当天分支时，使用 <code>master_MMDD</code>。</li>
+        <li>其他项目继续使用原固定上线分支，例如前端的 <code>master_launched</code> 或自定义固定值，不会被全局当天分支带着走。</li>
+        <li>看板会直接显示「MR 源分支」，以这一列为准；目标分支为 <code>master</code>。</li>
+      </ul>
+      <h3>完成发版</h3>
+      <p>「标记已发版」只处理当前卡片；「全部发版」会把当前所有发版中需求一起标记为已发版。它们都表示<strong>发版流程已完成</strong>，不是“开始发版”，也不会自动合并或部署。</p>
+    </section>
+
+    <section class="doc-section" id="branches">
+      <div class="section-head"><span class="section-no">06</span><div><h2>分支查询与索引</h2><p class="section-sub">「获取分支」看分支列表，「刷新分支索引」分析分支覆盖哪些需求。</p></div></div>
+      <div class="grid-2">
+        <div class="mini-card"><h3>获取分支</h3><p>读取配置了本地路径的项目分支，按项目分组展示，可搜索、点击复制。每天首次打开会尝试后台刷新，结果有本地缓存。</p></div>
+        <div class="mini-card"><h3>刷新分支索引</h3><p>分析提交记录里的需求 ID，用于自动匹配、影响面和未登记分支。项目必须同时配置 MR 地址与本地路径。</p></div>
+      </div>
+      <h3>只看我的分支</h3>
+      <p>默认开启，按分支首个独占提交的作者判断创建者，减少同事分支造成的噪声。需要看全部时取消勾选并重新刷新。取远端分支优先使用本地克隆的 origin 凭据，引擎不会主动弹 GitLab 登录框。</p>
+      <h3>自动匹配与影响面</h3>
+      <ul>
+        <li><strong>反查</strong>：根据提交记录里的需求 ID，证据最可靠；分支名里没有需求 ID 的融合分支也能识别。</li>
+        <li><strong>分支名</strong>：根据名称推断，仅作为补充。</li>
+        <li><strong>自动匹配</strong>：把索引建议的分支追加到需求，不覆盖原有分支。</li>
+        <li><strong>影响面</strong>：提示一条分支还覆盖哪些其他需求，防止只登记其中一个需求而漏发。</li>
+      </ul>
+      <h3>点开发分支时的 MR 目标</h3>
+      <div class="table-wrap"><table>
+        <tr><th>需求状态</th><th>新建 MR 的目标分支</th></tr>
+        <tr><td><span class="tag tag-new">新建</span></td><td><code>test</code></td></tr>
+        <tr><td><span class="tag tag-pending">待发版</span></td><td><code>uat</code></td></tr>
+        <tr><td><span class="tag tag-releasing">发版中 / 已发版</span></td><td>按公共固定分支、需求目标分支及当天分支检测结果确定。</td></tr>
+      </table></div>
+    </section>
+
+    <section class="doc-section" id="unregistered">
+      <div class="section-head"><span class="section-no">07</span><div><h2>未登记分支</h2><p class="section-sub">专门检查“有代码提交，但没有需求登记”的漏网分支。</p></div></div>
+      <p>点「未登记分支」标题展开。面板按分支名跨项目聚合，展示涉及项目、独占提交数和最近提交日期，支持按项目或分支名搜索。</p>
+      <ul>
+        <li><strong>需要发版</strong>：回到需求清单补充登记，或通过自动匹配挂到对应需求。</li>
+        <li><strong>无需需求</strong>：纯技术重构、环境调整等，确认后不再提示。</li>
+        <li><strong>忽略</strong>：废弃或不再关心的分支。</li>
+        <li><strong>恢复</strong>：误处置时，在已处置详情中恢复为待确认。</li>
+      </ul>
+      <div class="note">这个面板依赖分支索引。没有刷新索引、缺少本地路径或远端列表获取失败时，先处理面板顶部的诊断提示，不要把“没算出来”当成“没有未登记分支”。</div>
+    </section>
+
+    <section class="doc-section" id="sync">
+      <div class="section-head"><span class="section-no">08</span><div><h2>飞书项目同步</h2><p class="section-sub">只影响需求导入；不登录飞书也能使用本地分支和发版看板。</p></div></div>
+      <h3>首次准备</h3>
+      <ol>
+        <li>在终端执行 <code>meegle auth login</code>，按提示选择空间。</li>
+        <li>用 <code>meegle auth status</code> 确认 <code>authenticated: true</code>。</li>
+        <li>打开「同步设置」，确认空间和工作项类型。未登录时窗口顶部会给出具体提示。</li>
+      </ol>
+      <h3>同步设置</h3>
+      <ul>
+        <li><strong>工作项类型可多选</strong>：同一空间可能按业务域拆成多张需求表，只选一类会漏掉其他域。</li>
+        <li><strong>MQL 模板</strong>：支持 <code>{space}</code>、<code>{type}</code>、<code>{statusFilter}</code> 占位符。</li>
+        <li><strong>排除状态</strong>：默认 <code>已结束,已上线</code>，逗号分隔；系统按各类型实际支持的状态取交集。</li>
+        <li><strong>每类最多拉取</strong>：控制同步量，避免大量历史需求占满额度。</li>
+      </ul>
+      <h3>预览与导入</h3>
+      <ol>
+        <li>点「同步飞书项目」，等待各类型拉取完成。</li>
+        <li>按状态分组检查需求及自动匹配分支，可全选本组或逐条勾选。</li>
+        <li>已导入需求会标记且不能重复勾选；预览不会默认替你选中需求。</li>
+        <li>点「导入选中 N 条」，新需求进入「新建」，不会覆盖本地已有需求。</li>
+      </ol>
+    </section>
+
+    <section class="doc-section" id="backup">
+      <div class="section-head"><span class="section-no">09</span><div><h2>备份与导入导出</h2><p class="section-sub">自动保存不等于有备份，重要发版清单请定期写入 backup。</p></div></div>
+      <div class="grid-2">
+        <div class="mini-card"><h3>备份（推荐）</h3><p>点「备份」写入项目 <code>backup/</code>。点「备份记录」可查看历史、整份恢复、删除或打开目录；恢复需二次确认。</p></div>
+        <div class="mini-card"><h3>导出 / 导入</h3><p>导出 JSON 用于换机或分享。导入会覆盖当前数据，操作前先备份；旧版文件缺少的新字段不会清空现有配置。</p></div>
+      </div>
+      <h3>备份包含什么</h3>
+      <ul>
+        <li>包含项目、需求、分支缓存、公共上线分支、分支处置、手工关联和飞书同步配置。</li>
+        <li>不包含可重算的分支索引；恢复后重新「刷新分支索引」即可。</li>
+        <li>卡片折叠、排序、分组展开状态只保存在本机浏览器，不随导出或备份迁移。</li>
+      </ul>
+      <p>每天首次打开会出现备份提醒：「备份保存」优先写入项目目录，「暂不保存」当天不再提醒。</p>
+    </section>
+
+    <section class="doc-section" id="shortcuts">
+      <div class="section-head"><span class="section-no">10</span><div><h2>键盘快捷键</h2><p class="section-sub">减少重复点击。</p></div></div>
+      <div class="table-wrap"><table>
+        <tr><th>快捷键</th><th>功能</th></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>N</kbd></td><td>新增需求。</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>聚焦需求搜索框。</td></tr>
+        <tr><td><kbd>Escape</kbd></td><td>关闭弹窗、清除搜索、关闭右键菜单或退出排序模式。</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>在适用输入框中确认添加项目、保存上线分支或确认发版。</td></tr>
+      </table></div>
+    </section>
+
+    <section class="doc-section" id="qa">
+      <div class="section-head"><span class="section-no">11</span><div><h2>基础 QA</h2><p class="section-sub">先查这里，再判断是不是功能异常。</p></div></div>
+      <div class="qa-list">
+        <details><summary>工具会自动建分支、提交 MR、合并或部署吗？</summary><div class="qa-answer">不会。工具只读取远端分支、管理本地清单并打开 GitLab 页面。分支创建、MR 提交、合并和部署都由你在对应系统确认。</div></details>
+        <details><summary>NB 和 MR 有什么区别？</summary><div class="qa-answer">NB 是 New Branch，打开新建分支页面；MR 是 Merge Request，打开合并请求页面。通常先建上线分支，再把开发分支合入上线分支，最后从上线分支向 master 创建发版 MR。</div></details>
+        <details><summary>我明明建好了分支，为什么显示「未检测」？</summary><div class="qa-answer">「未检测」只表示尚未查询。单个 NB 不会自动启动检测，点看板的「立即检测」即可；检测后会显示「已建立」和最后查询时间。</div></details>
+        <details><summary>删除远端分支后，为什么还显示「已建立」？</summary><div class="qa-answer">当前版本每次检测都会重新查询全部项目，包括之前成功的项目。点「立即检测」后应变为「未建立」；同时查看「上次检测」确认页面显示的是新结果。</div></details>
+        <details><summary>前端也会被切到 master_MMDD 吗？</summary><div class="qa-answer">只有当前项目真实检测到当天分支时才切换。没有当天分支的项目继续使用原固定上线分支，例如 master_launched；看板「MR 源分支」列会明确显示最终取值。</div></details>
+        <details><summary>批量打开只开了一个，或者打开了文档目录怎么办？</summary><div class="qa-answer">更新到当前版本并重启本地引擎后，被浏览器拦截的项目会由系统 URL 协议在默认浏览器补开，不再使用资源管理器打开 URL。若仍有个别失败，可用看板每行的「打开 NB」。</div></details>
+        <details><summary>「批量开始发版」和「全部发版」是一回事吗？</summary><div class="qa-answer">不是。「批量开始发版」把勾选的待发版需求转到发版中；「全部发版」把当前所有发版中需求标记为已发版，是完成动作。</div></details>
+        <details><summary>发版中发现需求信息填错了，能直接编辑吗？</summary><div class="qa-answer">发版中和已发版不允许直接编辑。先「恢复待发版」，修改后重新开始发版；恢复待发版会清除原发版时间。</div></details>
+        <details><summary>没有配置本地路径，哪些功能还能用？</summary><div class="qa-answer">只要配置了 MR 地址，仍可使用 NB、MR 和远端当天分支检测。本地提交反查、影响面、自动匹配和未登记分支需要本地路径。</div></details>
+        <details><summary>飞书未登录会影响发版吗？</summary><div class="qa-answer">只影响从飞书拉取需求。手工维护需求、分支查询、上线分支检测、NB / MR 和备份都可继续使用。</div></details>
+        <details><summary>页面需求突然变成 0 条，是数据被删了吗？</summary><div class="qa-answer">先检查地址是否从 localhost 改成 127.0.0.1，或端口从 1949 变成其他端口；这两种情况都会读到另一份浏览器数据。再检查是否加载了同目录 toDo.json，以及是否有可恢复的备份。</div></details>
+        <details><summary>导入 JSON 前要注意什么？</summary><div class="qa-answer">导入是整体覆盖，不是追加合并。先点「备份」留底，再导入。若只是增加需求，建议使用飞书同步或手工新增，不要用导入代替。</div></details>
+        <details><summary>检测失败和未建立有什么区别？</summary><div class="qa-answer">「未建立」是查询成功但远端没有该分支；「检测失败」是仓库地址、网络或凭据导致查询没完成。检测失败时不能直接判断分支不存在，应按错误提示处理后重试。</div></details>
+        <details><summary>更新后按钮或接口没有生效怎么办？</summary><div class="qa-answer">页面改动先刷新，必要时 Ctrl+F5。涉及 server.js 的接口改动必须重启本地引擎；更新包含引擎代码时，右上角会持续显示「重启后生效」，检测到引擎真正重启后才恢复版本号。仍异常时确认浏览器打开的是当前项目对应的端口。</div></details>
+      </div>
+    </section>
+    <div class="footer">发版小助手 · 按模块使用指南 · <a href="./todo-release.html">返回主页面</a></div>
+  </main>
 </div>
-
-<div class="card">
-  <h3>更新到最新版本</h3>
-  <p>页头右上角的<strong>版本号徽标</strong>（如 <code>v3f9a1c2</code>）既是当前版本，也是更新入口：
-  <strong>点一下就检查并拉取最新代码</strong>，拉到新版会自动刷新页面，不用自己去 <code>git pull</code>。</p>
-  <ul>
-    <li>提示「改动包含引擎代码」时：关掉服务窗口、重跑 <code>start-server.bat</code>，再刷新页面
-      —— 引擎已经加载在进程里，光刷新页面不会重新加载它。</li>
-    <li>提示「拉取需要 GitHub 登录」时：在项目目录里手工执行一次 <code>git pull</code> 完成浏览器登录
-      （私有仓库必须登录），之后点徽标就能直接更新。</li>
-    <li>也可以直接双击 <code>更新.bat</code>。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>数据存储优先级</h3>
-  <ol>
-    <li>同目录下的 <code>toDo.json</code>（如果存在，每次打开自动加载）</li>
-    <li>浏览器 <code>localStorage</code>（自动保存，关闭浏览器不丢失；<strong>按协议+主机+端口隔离</strong>，换端口就是另一份数据）</li>
-    <li>项目 <code>backup/</code> 目录（点「备份」写入，清浏览器缓存也不会丢，推荐定期点）</li>
-    <li>手动 <strong>导出/导入</strong> JSON 文件（适合发给别人或存到别处）</li>
-  </ol>
-  <p style="margin-top:10px">v2 新增的本地键：<code>todo_branch_index</code>（分支索引，可重算，<strong>不导出</strong>）、
-  <code>todo_branch_triage</code>（未登记分支的处置）、<code>todo_branch_links</code>（手工关联）、
-  <code>todo_meegle_config</code>（同步设置）。后三个会随导出文件一起备份。</p>
-  <p>卡片的<strong>折叠状态、待发版的排序、分组的展开收起</strong>同样只存在本机浏览器，刷新后保持，
-  但<strong>不导出、也不随备份文件走</strong> —— 它们是「怎么看」的浏览状态，不是需求数据。</p>
-</div>
-
-<!-- ===== 从 v1 升级 ===== -->
-<h2>二、从 v1 升级到 v2</h2>
-
-<div class="card">
-  <h3>数据不用搬：用同一个地址打开就能看到</h3>
-  <p>v2 沿用 v1 的存储键名（<code>todo_project_names</code>、<code>todo_release_data</code>、<code>todo_branch_cache</code>、<code>todo_launch_branch</code>），
-  而浏览器存储按<strong>协议 + 主机 + 端口</strong>隔离，两边默认都是 <code>http://localhost:1949</code> —— 同一个源，
-  所以在 v2 目录启动服务、打开页面时，<strong>v1 里已登记的需求、项目清单、公用上线分支就已经在了</strong>，不需要导出导入。</p>
-  <table class="table-demo">
-    <tr><th style="width:180px">前提</th><th>说明</th></tr>
-    <tr><td>地址与 v1 一致</td><td><code>localhost</code> 与 <code>127.0.0.1</code> 在浏览器眼里是两个站，数据不通用。两版的启动脚本都自动打开 <code>http://localhost:1949</code>，不要手敲成 IP。</td></tr>
-    <tr><td>端口与 v1 一致（1949）</td><td>端口被占用时 v2 会自动顺延（1949 → 1950 …），换了端口就是另一份数据。页头出现 <code>引擎端口 19xx（非默认）</code> 即是此情况：先关掉占用 1949 的程序（多半是没关干净的 v1 服务窗口）再重启。</td></tr>
-    <tr><td>两版不同时运行</td><td>v1 与 v2 默认都监听 1949，同时开会有一个起不来。日常只用 v2，先关掉 v1 的服务窗口。</td></tr>
-  </table>
-</div>
-
-<div class="card">
-  <h3>换机器 / 换浏览器 / 换目录：走导出导入</h3>
-  <ol>
-    <li>在 <strong>v1</strong> 页面点「导出」，得到 <code>todoList-发版需求-&lt;时间&gt;.json</code>；</li>
-    <li>在 <strong>v2</strong> 页面点「导入」，选中该文件即可。</li>
-  </ol>
-  <p>v1 的导出文件只有 4 个字段，v2 完全兼容：导入后「需求清单、项目清单、分支缓存、公用上线分支」按文件内容<strong>整体替换</strong>，
-  而 v2 新增的<strong>分支处置、手工关联、同步设置不受影响</strong>——老文件里没有这些字段，v2 保留现有值，不会清空。</p>
-  <p>若 v1 目录里放过 <code>toDo.json</code>，把它复制到 v2 目录同样有效（它的优先级高于 localStorage）。</p>
-</div>
-
-<div class="card">
-  <h3>升级后要补的配置（v1 里没有）</h3>
-  <ol>
-    <li><strong>每个项目的「本地克隆路径」+「MR 地址」</strong>：分支索引要靠这两项才能反查「这条需求被哪些分支覆盖」。
-      只填其一，点「刷新分支索引」会提示「没有同时配置 MR 地址与本地路径的项目」。</li>
-    <li><strong>飞书项目同步设置</strong>：空间 + 工作项类型（可多选）+ MQL 模板，配一次即可。</li>
-    <li><strong>确认「只看我的分支」</strong>：v2 默认勾选（只列你自己创建的分支），想看全部就取消勾选。</li>
-  </ol>
-</div>
-
-<div class="card">
-  <h3>建议的切换顺序</h3>
-  <ol>
-    <li>先在 v1 里点一次「导出」留底（万一浏览器缓存出问题，这就是后悔药）；</li>
-    <li>关掉 v1 的服务窗口 → 在 v2 目录双击 <code>start-server.bat</code>；</li>
-    <li>确认需求、项目都还在 → 点一次「备份」（写进 <code>backup/</code>，清浏览器缓存也不丢）；</li>
-    <li>补上项目路径与同步设置，跑一次「刷新分支索引」。</li>
-  </ol>
-  <p style="margin-top:10px">v1 目录留着不影响使用，但别再启动它的服务（会抢 1949 端口），日常只用 v2。</p>
-</div>
-
-<!-- ===== 需求管理 ===== -->
-<h2>三、需求管理</h2>
-
-<div class="card">
-  <h3>需求以卡片展示</h3>
-  <p>需求区已从表格改为<strong>卡片</strong>：一条需求一张卡片，按状态分组排列
-  （<span class="tag tag-new">新建</span> / <span class="tag tag-pending">待发版</span> /
-  <span class="tag tag-releasing">发版中</span> / <span class="tag tag-released">已发版</span>）。</p>
-  <p><strong>卡片头</strong>一行是这条需求的摘要与操作：</p>
-  <table class="table-demo">
-    <tr><th style="width:170px">元素</th><th>说明</th></tr>
-    <tr><td>需求名称</td><td>卡片的标题</td></tr>
-    <tr><td>需求ID</td><td>等宽字体显示，<strong>点一下打开飞书需求详情</strong>；没有需求ID的需求不显示这一项</td></tr>
-    <tr><td>分支数摘要</td><td>如 <code>4 分支 · 同发 2</code>；一条分支都没挂时显示 <code>未关联分支</code></td></tr>
-    <tr><td>发版时间</td><td>已发版的需求会带上发版时间（如 <code>发版时间 2026-10-28</code>）</td></tr>
-    <tr><td>操作按钮</td><td>按当前状态给出能做的动作：待发版是「编辑 / 发版 / 回退新建 / 删」，发版中是「标记已发版 / 恢复待发版 / 删」，已发版是「恢复待发版 / 删」</td></tr>
-  </table>
-  <p><strong>卡片体</strong>按「项目 → 分支 → 影响面 → 备注」逐行排列，一条分支占一行：</p>
-  <ul>
-    <li><strong>项目</strong>：彩色标签，同一个项目在整页里用同一种颜色。</li>
-    <li><strong>分支</strong>：等宽字体，<strong>点一下 = 复制分支名 + 打开 GitLab 的「新建 MR」页</strong>
-      （来源分支与目标分支已经预填好，但仍要你自己在 GitLab 那边点提交，见第六节）。</li>
-    <li><strong>影响面</strong>：<code>+1</code> / <code>+3</code> 形式的徽标，鼠标悬浮弹出气泡（见第五节「影响面提示」）。</li>
-    <li><strong>备注</strong>：📝 按钮，有备注时高亮。</li>
-  </ul>
-  <p>「一同发版」的分支单独一行，带<strong>「同发」</strong>标签、也用另一种底色，与需求自己的分支区分开。
-  还没挂任何分支的卡片会直接给出提示：点「编辑」补上，或用「自动匹配」把索引里查到的分支挂上来。</p>
-</div>
-
-<div class="card">
-  <h3>折叠：单条卡片与整组</h3>
-  <ul>
-    <li><strong>单条折叠</strong>：点卡片左侧的箭头即可折起 / 展开。折起后只剩卡片头那一行摘要
-      （名称、需求ID、分支数、操作按钮），要看细节点开就行。</li>
-    <li><strong>整组折叠</strong>：每个分组标题旁都有 <strong>「卡片展开」/「卡片折叠」</strong> 两个按钮，
-      它们<strong>只作用于本组</strong>，不影响其他分组。点分组标题本身则是收起 / 展开这一整组
-      （<strong>已发版分组默认是收起的</strong>）。</li>
-    <li><strong>已发版的卡片默认就是折叠的</strong>（历史需求通常只看个名字），待发版与发版中的卡片默认展开。
-      点「卡片展开」时会顺带把该分组一起打开。</li>
-    <li><strong>搜索时会自动展开所有卡片</strong>：否则搜到了却看不见内容。清空搜索后回到你原来折叠 / 展开的样子。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>排序（仅「待发版」）</h3>
-  <p>只有 <span class="tag tag-pending">待发版</span> 分组的标题旁有 <strong>「排序」</strong> 按钮
-  —— 发版顺序是一件要安排的事，发版中 / 已发版不需要重排：</p>
-  <ol>
-    <li>点「排序」进入排序模式：卡片会<strong>自动折起</strong>（一屏能看更多、目标位置也更好判断），
-      同时卡片左侧出现 <code>⠿</code> <strong>拖拽手柄</strong>。</li>
-    <li>拖动 <code>⠿</code> 手柄把卡片拖到想要的位置，松手即生效。</li>
-    <li>点 <strong>「完成排序」</strong> 退出排序模式（按 <kbd>Escape</kbd> 也可以）。</li>
-  </ol>
-  <ul>
-    <li><strong>顺序会自动保存</strong>，刷新页面后保持。退出排序模式不会自动展开卡片，想看细节就点分组旁的「卡片展开」。</li>
-    <li><strong>不能跨分组拖</strong>：拖到别的分组不会生效。要改状态请用卡片上的状态按钮
-      （「发版」「标记已发版」「恢复待发版」）。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>卡片的状态区分</h3>
-  <p>卡片靠<strong>左侧色条 + 一层很淡的底色</strong>区分状态，扫一眼就能分开，
-  底色浅到不影响分支名的可读性：</p>
-  <table class="table-demo">
-    <tr><th style="width:150px">状态</th><th>色条 / 底色</th></tr>
-    <tr><td><span class="tag tag-new">新建</span></td><td>蓝色</td></tr>
-    <tr><td><span class="tag tag-pending">待发版</span></td><td>橙色</td></tr>
-    <tr><td><span class="tag tag-releasing">发版中</span></td><td>紫色</td></tr>
-    <tr><td><span class="tag tag-released">已发版</span></td><td>绿色</td></tr>
-  </table>
-  <p class="note"><strong>折叠、排序、分组的展开收起都只存在本机浏览器里</strong>（localStorage），刷新后保持，
-  但<strong>不跟着导出 / 备份文件走</strong> —— 换机器、换浏览器后回到默认状态，需要自己再折一遍。</p>
-</div>
-
-<div class="card">
-  <h3>需求状态流转</h3>
-  <p>每条需求有 4 种状态，按以下流程流转：</p>
-  <p style="text-align:center;font-size:15px;margin:12px 0">
-    <span class="tag tag-new">新建</span> &rarr;
-    <span class="tag tag-pending">待发版</span> &rarr;
-    <span class="tag tag-releasing">发版中</span> &rarr;
-    <span class="tag tag-released">已发版</span>
-  </p>
-  <ul>
-    <li><strong>新建</strong>：刚创建的需求。点击"编辑"可修改信息，"设为待发版"进入下一状态。</li>
-    <li><strong>待发版</strong>：已确认待上线的需求。点击"发版"开始发版流程，支持编辑。</li>
-    <li><strong>发版中</strong>：正在发布的需求。记录发版时间，<strong>不支持编辑</strong>。可"标记已发版"或"恢复待发版"。</li>
-    <li><strong>已发版</strong>：发版完成的需求。记录发版时间，可"恢复待发版"。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>新增/编辑需求</h3>
-  <ol>
-    <li>点击 <strong>"+ 新增需求"</strong> 按钮，在需求列表顶部出现编辑行。</li>
-    <li>填写<strong>需求名称</strong>（必填）和<strong>需求链接</strong>（可选）。</li>
-    <li>添加<strong>涉及项目及分支名</strong>：选择项目名、填写分支名。可添加多行，使用 📂 按钮查看该项目所有分支。</li>
-    <li>添加<strong>一同发版分支</strong>：填写依赖的同步分支信息（如第三方组件分支）。只有分支名非空时才会保存。</li>
-    <li>每个分支行可添加<strong>备注</strong>（📝），记录 SQL 脚本、DDL 变更、注意事项等。</li>
-    <li>点击"保存"完成新增。新增的需求会以高亮动画显示。</li>
-  </ol>
-  <p>点击单条需求的<strong>"编辑"</strong>按钮可修改已有需求（仅在新建/待发版状态下可编辑）。</p>
-</div>
-
-<div class="card">
-  <h3>搜索与过滤</h3>
-  <p>顶部搜索框支持按以下内容实时过滤：</p>
-  <ul>
-    <li>需求名称</li>
-    <li>需求链接</li>
-    <li>分支名称</li>
-  </ul>
-  <p>搜索时<strong>所有卡片自动展开</strong>，命中的分支行直接可见；清空搜索后恢复原来的折叠 / 展开状态。</p>
-  <p>点击搜索框右侧 ✕ 按钮或按 <kbd>Escape</kbd> 清除搜索。</p>
-</div>
-
-<!-- ===== 发版流程 ===== -->
-<h2>四、飞书项目同步（v2 新增）</h2>
-
-<div class="note">
-  <strong>前置条件：</strong>本地服务已启动，且已登录飞书项目。首次使用需在终端执行一次
-  <code>meegle auth login</code> —— <strong>不带参数</strong>，CLI 会列出空间让你选
-  （各版本对 <code>--host</code> 的支持不一致，带上可能报 <code>unknown command "project" for "meegle"</code>；
-  若仍报 <code>unknown command</code>，先 <code>npm i -g @lark-project/meegle@latest</code> 升级再试）；
-  完成后用 <code>meegle auth status</code> 自检，看到 <code>authenticated: true</code> 即可。
-  「同步设置」窗口顶部也会实时显示登录状态，未登录时直接照那里的提示做。
-  <br><br>
-  <strong>只有这个功能依赖飞书：</strong>「刷新分支索引」与「未登记分支」读的是你本机的 git 提交记录，没登录飞书也照常可用。
-</div>
-
-<div class="card">
-  <h3>为什么类型是「多选」</h3>
-  <p>一个飞书项目空间里，「需求管理」类工作项是<strong>按业务域拆成多张独立的表</strong>的。以
-  <code>your_space</code> 空间为例，22 个工作项类型里有 10 个属于需求管理类：</p>
-  <table class="table-demo">
-    <tr><th>类型</th><th>名称</th><th>类型</th><th>名称</th></tr>
-    <tr><td><code>story</code></td><td>OMS需求管理</td><td><code>tms</code></td><td>TMS需求管理</td></tr>
-    <tr><td><code>oms</code></td><td>SCM需求管理</td><td><code>bms</code></td><td>BMS需求管理</td></tr>
-    <tr><td><code>bd</code></td><td>BD 需求管理</td><td><code>ops</code></td><td>架构&amp;运维</td></tr>
-    <tr><td><code>wms_owms_pda_opda</code></td><td>仓库需求管理</td><td><code>ai</code></td><td>AI项目需求管理</td></tr>
-    <tr><td><code>enhancements</code></td><td>优化</td><td><code>optimization_space</code></td><td>优化需求管理</td></tr>
-  </table>
-  <p class="note" style="margin-top:10px"><strong>只勾一个类型会静默漏掉其他域的全部需求</strong>，而且不会报错。
-  默认已勾选所有「需求管理 / 优化」类，通常不需要改。</p>
-</div>
-
-<div class="card">
-  <h3>同步设置</h3>
-  <ol>
-    <li>点击顶部 <strong>「同步设置」</strong>。</li>
-    <li>选择<strong>空间</strong>（自动列出你有权限访问的）。</li>
-    <li>勾选需要的<strong>工作项类型</strong>（可多选）。</li>
-    <li>按需修改 <strong>MQL 模板</strong>：<code>{space}</code>、<code>{type}</code>、<code>{statusFilter}</code> 会被自动替换。</li>
-    <li>设置每个类型最多拉取多少条。</li>
-    <li><strong>排除状态</strong>：逗号分隔，默认 <code>已结束,已上线</code>。
-        实测一个空间的 story 表 805 条里有 335 条已结束、412 条已上线，真正在流程中的只有 58 条 ——
-        不排除的话拉回来的绝大部分是废数据，还会把拉取额度占满。留空则不过滤。</li>
-    <li>点「保存」。</li>
-  </ol>
-  <p class="note"><strong>状态名是每个工作项类型各自一套的。</strong>例如「已上线」只在 OMS需求管理里有，
-  SCM需求管理里没有这个状态。系统会<strong>按类型取交集</strong>后再过滤，
-  所以同一份排除清单用在不同类型上会自动各取所需（预览顶部会写出每个类型实际排除了什么）。</p>
-</div>
-
-<div class="card">
-  <h3>同步预览与导入</h3>
-  <ol>
-    <li>点击顶部 <strong>「同步飞书项目」</strong>，等待拉取完成。</li>
-    <li>窗口顶部显示各类型拉取情况，例如 <code>OMS需求管理：50/58（已排除 已结束/已上线）</code>，
-        分母是该类型<strong>排除后</strong>的总数。</li>
-    <li>需求<strong>按状态分组</strong>，组头显示条数与新增数，可「全选本组 / 取消本组」——
-        一次只导入某一批状态的（比如只导「开发中 + 已提测」）；
-        点组头可<strong>收起/展开</strong>该组，收起只是少滚动，不影响已勾选的项。</li>
-    <li>每条需求显示：名称、需求ID、类型，以及<strong>自动匹配到的分支</strong>
-        （绿色实心＝按提交反查命中，黄色虚线＝按分支名推断）。</li>
-    <li>打开预览时<strong>不会预勾选任何需求</strong>，也不会默认打开「只看未导入」——
-        筛选与勾选都由你决定。已导入的需求会标「已导入」且不可勾选。</li>
-    <li>点「全选新增」或逐条勾选，再点「导入选中 N 条」。</li>
-  </ol>
-  <p><strong>导入规则：</strong>只创建新需求，状态为「新建」；<strong>已存在的需求不会被覆盖</strong>，
-  你在本地改过的标题和分支不会被同步冲掉。</p>
-</div>
-
-<h2>五、分支索引与未登记分支（v2 新增）</h2>
-
-<div class="card">
-  <h3>刷新分支索引</h3>
-  <p>点击顶部 <strong>「刷新分支索引」</strong>，系统会分析每个项目的本地提交历史，得出「每条分支覆盖了哪些需求」。
-  需要项目同时配置了 <strong>MR 地址</strong>与<strong>本地路径</strong> —— 反查依赖本地提交历史，没克隆就算不出来。</p>
-  <p>索引结果有有效期（10 分钟），过期会重算，也可以随时手动刷新。分支一直在长，
-  同一条分支隔几天覆盖的需求就可能变多。</p>
-  <p><strong>「只看我的分支」</strong>（默认开启）：只分析你创建的分支。判定依据是<strong>分支首个独占提交的作者</strong>
-  —— 也就是分支的起点作者，而不是提交最多的人。同事的分支混进来只会污染「未登记分支」和匹配结果，
-  所以默认不开。关掉后会包含所有人的分支，界面会标注当前口径与过滤掉的数量。</p>
-  <p class="note"><strong>打开「同步飞书项目」时会自动补算过期的索引</strong>，所以不需要每次先手动点一遍。</p>
-  <p class="note" style="margin-top:8px"><strong>如果同步预览里每条都显示「未匹配到分支」</strong>，先看窗口顶部的提示：
-  它通常不是"这条需求真的没有分支"，而是<strong>索引还没生成</strong>或<strong>项目没配全</strong>（缺 MR 地址或本地路径）。
-  提示会明确写出是哪种情况，以及要补什么。此时每行会显示 <code>—</code> 而不是「未匹配到分支」，以免被误读成单条需求的事实。</p>
-  <p class="note" style="margin-top:8px"><strong>不会弹 GitLab 登录框</strong>：取远端分支名时优先用<strong>本地克隆自己的 origin</strong>，
-  也就是你平时 <code>git fetch</code> 用的那套凭据（SSH 或已保存的 https），不会拿项目里填的 MR 链接去重新认证。
-  万一某个项目取不到远端列表，顶部会提示「N 个项目的远端分支列表未取到」——此时在该项目的克隆目录里执行一次
-  <code>git fetch</code> 让凭据进凭据管理器，再刷新即可（引擎本身永远不弹认证窗口，会直接放弃并告警）。</p>
-</div>
-
-<div class="card">
-  <h3>需求是怎么和分支对上的</h3>
-  <p>不靠分支名，靠<strong>提交记录里的需求ID</strong>（提交规范 <code>feat(模块-需求ID): ...</code>）。
-  因为大量分支根本不带需求ID，尤其是把几个需求合在一起发的「融合分支」：</p>
-  <table class="table-demo">
-    <tr><th style="width:320px">分支</th><th>反查出的需求</th></tr>
-    <tr><td><code>feat/ops四需求合并分支</code></td><td>6 个需求（分支名里一个都没写）</td></tr>
-    <tr><td><code>feat/7000000010默认规则属性配置</code></td><td>2 个需求（分支名只写了一个）</td></tr>
-  </table>
-  <p>三种来源取并集，界面上用颜色区分：<strong>反查</strong>（提交证据，最可靠）、<strong>分支名</strong>（推断）、<strong>手工</strong>。</p>
-</div>
-
-<div class="card">
-  <h3>影响面提示</h3>
-  <p>分支行上的橙黄色徽标就是<strong>影响面</strong>，显示成 <code>+1</code> / <code>+3</code> 这种样子：
-  表示这条分支的提交里还带着<strong>另外几个需求</strong>的改动（<code>+3</code> = 这条分支还覆盖 3 个需求）。</p>
-  <ul>
-    <li><strong>只覆盖 1 个</strong>需求时是淡色徽标，<strong>覆盖 2 个及以上</strong>时是实心徽标 —— 实心的要多看两眼。</li>
-    <li><strong>鼠标悬浮</strong>在徽标上会弹出气泡，里面写清：这条分支有多少个独占提交、最近一次提交是什么时候，
-      以及<strong>具体覆盖了哪几个需求</strong>（需求ID + 需求名称）。</li>
-    <li>气泡里的每一条需求<strong>都可以点开飞书需求详情</strong>，确认是不是要一起发。</li>
-  </ul>
-  <p>这是为了防止漏发：融合分支很容易只被登记到一个需求名下，实际却带着好几个需求的改动。</p>
-  <p class="note">看的是<strong>提交记录里的需求ID</strong>（反查），所以连「分支名里没写需求」的情况也能覆盖到；
-  没有配本地克隆路径、拿不到提交历史的项目，算不出影响面，也就不会有这个徽标。</p>
-</div>
-
-<div class="card">
-  <h3>「自动匹配」建议分支</h3>
-  <p>需求行上除了你手工挂的分支，还会出现一条蓝色虚线的 <code>自动匹配：项目 · 分支</code> ——
-  这是分支索引反查出来的、能覆盖这条需求的分支。<strong>点一下即可挂到该需求</strong>，不用自己去翻分支名。</p>
-  <p>它解决的是一个典型的「看不见」问题：一条覆盖了本需求、但没被手工挂上去的分支（融合分支最典型），
-  以前在页面上完全找不到 —— 它进不了「未登记分支」（它有需求ID），也不落在任何需求行上。
-  已经手工挂过的分支不会再重复建议。</p>
-  <p>同一项目下已经挂了别的分支时，点建议是<strong>追加一行，不覆盖原有分支</strong> ——
-  一条需求的代码同时落在同一仓库的两条分支上（融合分支 merge 了按需求命名的分支）是真实形态，
-  两个分支都要留在清单里。</p>
-</div>
-
-<div class="card">
-  <h3>未登记分支</h3>
-  <p>「未登记分支」区列出的是<strong>有提交、但查不到任何需求登记</strong>的分支 —— 通常是因为需求还没出，
-  或者一堆优化都做在一个分支里。按需求拉清单发版时，这类分支最容易被整条漏掉。</p>
-  <ul>
-    <li>整个面板<strong>默认收起</strong>（标题上会显示条数），点标题展开 —— 它是需要你确认的例外，不是每天要看的主线内容。</li>
-    <li>支持<strong>搜索</strong>：按分支名或项目名筛选，例如输入 <code>mdm二期</code> 只留这一条，输入 <code>ops-web</code> 只看该仓库还没登记的分支；已处置区跟着一起筛，搜一个处置过的分支也能找到并「恢复」。</li>
-    <li>按分支名<strong>跨项目聚合</strong>：同名分支出现在多个仓库时只显示一张卡片，并给出涉及的仓库与提交数。</li>
-    <li><strong>无需需求</strong>：纯技术重构、组件优化、环境调整等，标记后不再提示。</li>
-    <li><strong>忽略</strong>：已废弃或不再关心。</li>
-    <li>已处置的折叠在下方，点「恢复」可以重新提示。</li>
-  </ul>
-</div>
-
-<h2>六、发版流程</h2>
-
-<div class="card">
-  <h3>单条发版</h3>
-  <ol>
-    <li>确认需求处于 <span class="tag tag-pending">待发版</span> 状态。</li>
-    <li>点击"发版"按钮。</li>
-    <li><strong>如果已设置全局上线分支</strong>：直接转入发版中。</li>
-    <li><strong>如果未设置全局上线分支</strong>：弹出窗口，为每个涉及的项目填写目标分支名（即要合并到 master 的上线分支）。</li>
-    <li>填写完成后点"确认发版"，需求状态变为 <span class="tag tag-releasing">发版中</span>。</li>
-  </ol>
-  <p class="note">目标分支会保存在该需求上，后续发版中的项目按钮会据此生成正确的 MR 链接。</p>
-</div>
-
-<div class="card">
-  <h3>发版中的项目 MR</h3>
-  <p>在 <strong>"发版中"</strong> 分组的表头右侧，会显示当前发版涉及的项目按钮：</p>
-  <ul>
-    <li>点击项目按钮，直接跳转创建 MR（源: 上线分支 → 目标: master）。</li>
-    <li>源分支的确定顺序：<strong>全局上线分支</strong> &gt; <strong>发版时填写的项目目标分支</strong> &gt; <code>master_launched</code>。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>全部发版</h3>
-  <ul>
-    <li>发版中的需求列表旁有<strong>"全部发版"</strong>按钮，点击将所有发版中的需求标记为已发版。</li>
-    <li>已发版的需求自动记录发版完成时间。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>分支点击 MR 跳转</h3>
-  <p>在需求卡片的分支行里，点击分支名会自动<strong>复制分支名</strong>到剪贴板，并打开 GitLab 的「新建 MR」页面
-  （来源分支与目标分支已预填，目标分支按下表取）。只有该项目配置了 MR 地址时才会打开页面：</p>
-  <table class="table-demo">
-    <tr><th style="width:100px">需求状态</th><th>MR 目标分支</th></tr>
-    <tr><td><span class="tag tag-new">新建</span></td><td><code>test</code></td></tr>
-    <tr><td><span class="tag tag-pending">待发版</span></td><td><code>uat</code></td></tr>
-    <tr><td><span class="tag tag-releasing">发版中</span></td><td>全局上线分支 &gt; 项目目标分支 &gt; null</td></tr>
-    <tr><td><span class="tag tag-released">已发版</span></td><td>全局上线分支 &gt; 项目目标分支 &gt; null</td></tr>
-  </table>
-  <p class="note" style="margin-top:10px"><strong>它不会替你提交或合并</strong>：这里打开的只是 GitLab 的「新建 MR」页面，
-  来源分支与目标分支已经预填好，但必须<strong>你自己在 GitLab 那边点「Create merge request」</strong>才会产生 MR，
-  再点「Merge」才会合并；目标分支也<strong>不会是 <code>master</code></strong>（按上表取 <code>test</code> / <code>uat</code> / 上线分支）。
-  本工具对 GitLab 只做 <code>git ls-remote</code> 这类只读操作，不会 push、不会合并、不会改你的工作区。</p>
-</div>
-
-<!-- ===== 项目管理 ===== -->
-<h2>七、项目管理</h2>
-
-<div class="card">
-  <h3>展开/折叠</h3>
-  <p>点击 <strong>"项目管理"</strong> 区域可展开或折叠项目配置面板。</p>
-</div>
-
-<div class="card">
-  <h3>添加项目</h3>
-  <p>在项目管理区域底部填写：</p>
-  <ul>
-    <li><strong>项目名称</strong>（必填）</li>
-    <li><strong>MR 地址</strong>（可选，填写 GitLab 项目根地址或 MR 页面地址，用于自动生成 MR 链接）</li>
-    <li><strong>本地路径</strong>（可选，填写项目在本机的绝对路径，用于获取分支列表）</li>
-  </ul>
-  <p>按 <kbd>Enter</kbd> 或点击"添加"按钮。添加后项目会出现在标签列表中。</p>
-</div>
-
-<div class="card">
-  <h3>编辑/删除项目</h3>
-  <p>每个项目标签右侧有 ✏️（编辑）和 ×（删除）按钮：</p>
-  <ul>
-    <li>点击 ✏️ 进入编辑模式，修改后点"保存"。</li>
-    <li>点击 × 直接删除该项目。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>项目快捷操作</h3>
-  <p>每个项目标签旁的功能按钮：</p>
-  <table class="table-demo">
-    <tr><th>按钮</th><th>功能</th></tr>
-    <tr><td><strong>MR</strong></td><td>跳转到项目的 Merge Request 列表页</td></tr>
-    <tr><td><strong>NB</strong></td><td>跳转到新建分支页面（分支名自动为 <code>master_MMDD</code>，基于 master）</td></tr>
-    <tr><td>📁</td><td>显示该项目配置的本地路径（鼠标悬停查看）</td></tr>
-  </table>
-</div>
-
-<div class="card">
-  <h3>项目公用上线分支名</h3>
-  <p>在项目管理区域底部设置全局上线分支名（如 <code>master_launched</code>），用于：</p>
-  <ul>
-    <li>发版中的项目按钮生成 MR（源: 此分支 → 目标: master）</li>
-    <li>分支点击跳转 MR 时的目标分支回退值</li>
-  </ul>
-  <p>按 <kbd>Enter</kbd> 或点击"保存上线分支"。</p>
-</div>
-
-<div class="card">
-  <h3>项目下拉选择</h3>
-  <p>在新增/编辑需求时，输入项目名会自动弹出已维护的项目下拉列表：</p>
-  <ul>
-    <li>输入文字实时过滤匹配项目</li>
-    <li>点击选项或上下键 + Enter 选择</li>
-    <li>失去焦点后自动关闭</li>
-  </ul>
-</div>
-
-<!-- ===== 分支管理 ===== -->
-<h2>八、分支管理</h2>
-
-<div class="note">
-  <strong>前置条件：</strong>需要启动本地 Node.js 分支查询服务。
-  <ol>
-    <li>项目必须在"项目管理"中配置了<strong>本地路径</strong></li>
-    <li>在终端执行 <code>node server.js</code> 启动服务（端口 1949）</li>
-    <li>服务启动后会向 GitLab API 请求当前用户的用户名，用于过滤个人分支</li>
-  </ol>
-</div>
-
-<div class="card">
-  <h3>单项目分支查看</h3>
-  <p>在新增/编辑需求的每个分支行，点击 📂 按钮：</p>
-  <ul>
-    <li>查看该项目所有远程分支（过滤掉 origin/ 开头）</li>
-    <li>在弹窗中搜索过滤分支名</li>
-    <li>点击分支名自动填充到当前分支输入框</li>
-    <li>已被发版过的分支会以灰色标识（<code>released-branch</code>）</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>全部项目分支</h3>
-  <p>点击顶部 <strong>"获取分支"</strong> 按钮：</p>
-  <ul>
-    <li>为所有配置了本地路径的项目获取最近分支列表</li>
-    <li>结果以弹窗展示，按项目分组</li>
-    <li>支持全局搜索过滤</li>
-    <li>点击分支名直接复制到剪贴板</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>分支缓存</h3>
-  <ul>
-    <li>获取分支后自动缓存到 <code>localStorage</code>，下次打开直接使用缓存</li>
-    <li>每天首次打开页面时，<strong>自动后台静默刷新</strong>全部分支（当天已刷新则跳过）</li>
-    <li>顶部有进度条显示刷新状态</li>
-  </ul>
-</div>
-
-<!-- ===== 备注功能 ===== -->
-<h2>九、备注功能</h2>
-
-<div class="card">
-  <h3>为分支添加备注</h3>
-  <ul>
-    <li>在<strong>编辑模式</strong>下，每个分支行有 📝 按钮，点击打开备注编辑弹窗。</li>
-    <li>备注内容可记录 SQL 脚本、DDL 变更、注意事项等。</li>
-    <li>有备注的分支行 📝 按钮会高亮显示（<code>has-notes</code> 样式）。</li>
-    <li>在<strong>查看模式</strong>下，如果有备注则显示 📝 按钮，点击可查看但不可编辑。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>右键菜单</h3>
-  <p>在<strong>待发版</strong>和<strong>新建</strong>需求的分支行上点击右键：</p>
-  <ul>
-    <li>📝 添加/编辑备注</li>
-    <li>🗑️ 清除备注（仅当已有备注时显示）</li>
-  </ul>
-</div>
-
-<!-- ===== 导入导出 ===== -->
-<h2>十、备份与导入导出</h2>
-
-<div class="card">
-  <h3>备份（推荐）</h3>
-  <p>数据平时只存在<strong>浏览器 localStorage</strong> 里，清缓存、换浏览器或换电脑就没了。
-  点顶部 <strong>"备份"</strong>，引擎会把一整份数据写进<strong>项目目录下的 <code>backup</code> 文件夹</strong>：</p>
-  <pre>D:\自研\发版小助手-v2\backup\todoList-发版需求-20261104134107.json</pre>
-  <ul>
-    <li>备份跟代码放在一起，拷走整个文件夹就带走了数据；<code>backup/</code> 已在 .gitignore 里，不会提交到仓库。</li>
-    <li>点 <strong>"备份记录"</strong> 可以看到目录里的历史备份（文件名、条数、大小、时间），并支持<strong>整份恢复</strong>
-      —— 恢复是覆盖性操作，所以要<strong>点两次</strong>（第一次变成"确认恢复"）。</li>
-    <li>弹窗里的 <strong>"打开目录"</strong> 会直接在资源管理器里打开备份文件夹。</li>
-    <li>每日提醒里的按钮现在也是<strong>备份保存</strong>：优先写进这个目录，引擎没起时才退回下载导出。</li>
-  </ul>
-  <p class="note">这样做的前提是引擎在跑（它负责写盘）。备份里<strong>不含分支索引</strong>：那是能从 git 重算的派生数据，
-  恢复后点一下"刷新分支索引"即可。</p>
-</div>
-
-<div class="card">
-  <h3>导出</h3>
-  <ul>
-    <li>点击顶部 <strong>"导出"</strong> 按钮。</li>
-    <li>生成 JSON 文件：<code>todoList-发版需求-时间戳.json</code></li>
-    <li>包含完整数据：项目列表、需求列表、分支缓存、上线分支设置，以及 v2 的分支处置与同步配置。</li>
-    <li>适合发给别人、或存到项目目录以外的地方。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>导入</h3>
-  <ul>
-    <li>点击顶部 <strong>"导入"</strong> 按钮，选择之前导出的 JSON 文件。</li>
-    <li>导入会<strong>覆盖</strong>当前所有数据并自动保存。</li>
-    <li>导入后自动清除编辑状态和新增行。</li>
-    <li>旧版本（v1）导出的文件缺少 v2 新增字段时<strong>不会清空</strong>你现有的分支处置与同步配置。</li>
-  </ul>
-</div>
-
-<div class="card">
-  <h3>每日备份提醒</h3>
-  <p>每天首次打开页面时，弹出备份提醒窗口：</p>
-  <ul>
-    <li>"备份保存" — 备份到项目 <code>backup/</code> 目录并关闭提醒</li>
-    <li>"暂不保存" — 关闭提醒（下次打开不再弹出当天）</li>
-  </ul>
-</div>
-
-<!-- ===== 键盘快捷键 ===== -->
-<h2>十一、键盘快捷键</h2>
-
-<div class="card">
-  <table class="table-demo">
-    <tr><th style="width:120px">快捷键</th><th>功能</th></tr>
-    <tr><td><kbd>Ctrl</kbd> + <kbd>N</kbd></td><td>新增需求</td></tr>
-    <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>聚焦搜索框</td></tr>
-    <tr><td><kbd>Escape</kbd></td><td>关闭所有弹窗 / 清除搜索 / 关闭右键菜单 / 退出排序模式</td></tr>
-  </table>
-</div>
-
-<div class="sep"></div>
-<p style="color:var(--text-muted);font-size:13px;text-align:center">需求发版管理工具 · 基于 Vue 3 · 纯静态无需构建</p>
-
-</div>
+<script>
+// 导航只表达当前阅读位置，不改变文档内容；移动端同样可横向选择模块。
+const tocLinks = [...document.querySelectorAll('.toc a')]
+const sections = tocLinks.map(link => document.querySelector(link.getAttribute('href'))).filter(Boolean)
+function activate(id) {
+  tocLinks.forEach(link => link.classList.toggle('active', link.getAttribute('href') === '#' + id))
+}
+tocLinks.forEach(link => link.addEventListener('click', () => activate(link.getAttribute('href').slice(1))))
+const observer = new IntersectionObserver(entries => {
+  const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+  if (visible.length) activate(visible[0].target.id)
+}, { rootMargin: '-12% 0px -72% 0px', threshold: 0 })
+sections.forEach(section => observer.observe(section))
+</script>
 </body>
 </html>

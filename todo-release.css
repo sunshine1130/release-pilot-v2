@@ -1421,6 +1421,10 @@ input[data-role="syncProjectName"] {
   cursor: pointer; margin-left: 8px;
 }
 .version-badge:hover { color: var(--accent); border-color: var(--accent); }
+.version-badge.has-update { color:#fff; background:#10b981; border-color:#10b981; font-weight:700; }
+.version-badge.has-update:hover { color:#fff; background:#059669; border-color:#059669; }
+.version-badge.restart-required { color:#fff; background:#f59e0b; border-color:#f59e0b; font-weight:700; }
+.version-badge.restart-required:hover { color:#fff; background:#d97706; border-color:#d97706; }
 .version-badge.busy, .version-badge:disabled { opacity: .6; cursor: progress; }
 
 /* ===== Empty state ===== */
@@ -1941,3 +1945,55 @@ tbody tr:hover td.col-actions { background: var(--surface-hover); }
 }
 .addline:hover { background: var(--accent-bg); }
 .line.empty-hint { background: transparent; border-style: dashed; color: var(--text-muted); font-size: 11px; }
+
+/* 批量流转与今日上线分支看板：状态直接跟在发版项目旁，避免另开页面核对 */
+.batch-check { flex-shrink: 0; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.batch-check input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.batch-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent-bg); color: var(--text-secondary); font-size: 12px; }
+.daily-branch-board { margin: 0 0 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
+.daily-board-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 12px; background: var(--surface-raised); border-bottom: 1px solid var(--border); }
+.daily-board-title, .daily-board-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.daily-board-title strong { font-size: 13px; }
+.daily-board-title > code { color: var(--purple); font-family: var(--mono); font-weight: 650; }
+.daily-board-summary, .daily-board-time { color: var(--text-muted); font-size: 11px; }
+.daily-project-list { padding: 4px 12px; }
+.daily-project-row { display: grid; grid-template-columns: minmax(120px,.8fr) 82px minmax(220px,1.5fr) auto; grid-template-areas: 'project status source actions' 'project error error actions'; align-items: center; gap: 10px; min-height: 38px; padding: 5px 0; border-bottom: 1px solid var(--border-light); }
+.daily-project-row:last-child { border-bottom: none; }
+.daily-project-row .project-tag { grid-area: project; justify-self: start; }
+.daily-status { grid-area: status; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.daily-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+.is-exists .daily-status { color: #047857; }
+.is-exists .daily-status::before { background: #10b981; }
+.is-missing .daily-status { color: #b45309; }
+.is-missing .daily-status::before { background: #f59e0b; }
+.is-checking .daily-status { color: var(--accent); }
+.is-checking .daily-status::before { background: var(--accent); animation: dailyPulse 1s infinite alternate; }
+.is-error .daily-status { color: var(--danger); }
+.is-error .daily-status::before { background: var(--danger); }
+.daily-mr-source { grid-area: source; color: var(--text-secondary); font-size: 11px; min-width: 0; }
+.daily-mr-source code { font-family: var(--mono); color: var(--text); word-break: break-all; }
+.daily-error { grid-area: error; color: var(--danger); font-size: 10px; }
+.daily-row-actions { grid-area: actions; display: flex; gap: 6px; justify-content: flex-end; }
+.daily-row-actions .btn, .daily-dialog-project .btn { text-decoration: none; white-space: nowrap; }
+.daily-board-hint { padding: 7px 12px; border-top: 1px solid var(--border-light); color: var(--text-muted); background: var(--surface-raised); font-size: 10.5px; }
+.daily-branch-dialog { width: min(620px,92vw); max-width: 620px; }
+.daily-dialog-projects { max-height: 300px; overflow-y: auto; margin: 10px 0 14px; }
+.daily-dialog-project { display: grid; grid-template-columns: minmax(120px,1fr) minmax(140px,1fr) auto; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-light); }
+.daily-dialog-project .project-tag { justify-self: start; width: max-content; max-width: 100%; }
+.daily-dialog-project code { font-family: var(--mono); font-size: 12px; }
+@keyframes dailyPulse { from { opacity: .35; } to { opacity: 1; } }
+@media (max-width: 700px) {
+  .daily-project-row { grid-template-columns: minmax(100px,1fr) 82px auto; grid-template-areas: 'project status actions' 'source source actions' 'error error error'; }
+}
+
+/* 页面 Guide：真实控件高亮，遮罩只阻断导览期间的误触，不修改页面数据 */
+.guide-entry { margin-left:6px; padding:2px 8px; border:1px solid var(--accent); border-radius:999px; background:var(--accent-bg); color:var(--accent); font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.guide-entry:hover { background:var(--accent); color:#fff; }
+.guide-overlay { position:fixed; inset:0; z-index:3000; }
+.guide-spotlight { position:fixed; border:2px solid #60a5fa; border-radius:10px; box-shadow:0 0 0 9999px rgba(15,23,42,.62),0 0 22px rgba(96,165,250,.65); pointer-events:none; transition:top .2s,left .2s,width .2s,height .2s; }
+.guide-tooltip { position:fixed; padding:16px 17px; border:1px solid #bfdbfe; border-radius:12px; background:#fff; box-shadow:0 18px 50px rgba(15,23,42,.28); }
+.guide-kicker { color:var(--accent); font-size:10px; font-weight:700; letter-spacing:.05em; }
+.guide-tooltip h3 { margin:5px 0 6px; font-size:17px; }
+.guide-tooltip p { margin:0 0 14px; color:var(--text-secondary); font-size:12px; line-height:1.75; }
+.guide-tooltip-footer { display:flex; align-items:center; gap:7px; }
+@media (max-width:600px) { .guide-entry { padding:2px 6px; font-size:10px; } .guide-tooltip { max-height:44vh; overflow-y:auto; } }

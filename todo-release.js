@@ -45,6 +45,8 @@ const LS_INDEX_CONFIG = 'todo_index_config'
 const LS_COLLAPSED = 'todo_collapsed_items'
 const LS_EXPANDED_RELEASED = 'todo_expanded_released'
 const LS_SECTION_EXPANDED = 'todo_section_expanded'
+const LS_DAILY_BRANCH_CHECK = 'todo_daily_branch_check'
+const LS_UPDATE_NOTICE = 'todo_update_notice'
 /** 索引 TTL：分支一直在长，实测同一条分支两天内需求覆盖就会变，不能无限期复用 */
 const INDEX_TTL_MS = 10 * 60 * 1000
 
@@ -68,6 +70,13 @@ createApp({
       addingItems: [],
       addingCounter: 0,
       editingIds: {},
+      selectedIds: [],
+      batchBranchDialog: { visible: false, branch: '', projects: [] },
+      dailyBranchCheck: {
+        date: getTodayStr(), branch: getDailyBranchName(), started: false, active: false,
+        checking: false, stopAt: 0, lastCheckedAt: '', fallbackLaunchBranch: '', projects: {}
+      },
+      pageGuide: { active: false, step: 0, rect: { left: 0, top: 0, width: 0, height: 0 } },
       toastMsg: '',
       toastShow: false,
       showReminder: false,
@@ -114,7 +123,7 @@ createApp({
       },
       syncSettings: { visible: false, loading: false, error: '', spaces: [], types: [] },
       // 版本徽标：点它就是「检查并更新」
-      appVersion: { commit: '', date: '', subject: '', branch: '', remote: '', dirty: false },
+      appVersion: { commit: '', date: '', subject: '', branch: '', remote: '', dirty: false, pid: 0, hasUpdate: false, remoteLatest: null, restartRequired: false, restartCommit: '', restartPreviousPid: 0 },
       updateBusy: false,
       // 备份到项目 backup/ 目录：列表、恢复与目录路径都由引擎给
       backupDialog: { visible: false, loading: false, error: '', dir: '', files: [], pendingRestore: '', pendingDelete: '' },
@@ -126,6 +135,28 @@ createApp({
       syncCollapsed: {},
       // 分支索引只保留自己创建的分支：同事的分支混进未登记列表与匹配结果纯是噪声
       indexConfig: { onlyMine: true }
+    })
+
+    const guideSteps = [
+      { title: '顶部工具条', text: '在这里新增或同步需求、搜索清单、备份数据、获取分支和刷新分支索引。右上角版本号用于检查更新。', selector: '.header-actions' },
+      { title: '项目管理', text: '展开后维护项目名称、MR 地址和本地路径。MR 与 NB 在这里打开；公共上线分支也在此保存。', selector: '.project-mgr' },
+      { title: '未登记分支', text: '这里列出有提交但查不到需求登记的分支。发版前检查它，确认哪些要补登记、无需需求或忽略。', selector: '.unreg-panel' },
+      { title: '需求卡片与批量流转', text: '左侧勾选后可批量设为待发版或批量开始发版。点卡片展开分支与备注，点分支名可复制并打开新建 MR。', selector: '.section[data-section="pending"] .req-card', fallback: '.section[data-section="pending"] .section-header' },
+      { title: '发版中与今日上线分支', text: '这里按项目展示当天分支是否已建立及实际 MR 源分支。可批量打开 NB、立即检测，再打开 MR；全部发版表示全部标记完成。', selector: '.daily-branch-board', fallback: '.section[data-section="releasing"] .section-header' },
+      { title: '已发版', text: '完成的需求保留在这里并记录时间，默认收起。需要修改或重新发版时，先恢复待发版。', selector: '.section[data-section="released"] .section-header' },
+    ]
+    const currentGuideStep = computed(() => guideSteps[state.pageGuide.step] || guideSteps[0])
+    const guideSpotlightStyle = computed(() => {
+      const r = state.pageGuide.rect
+      return { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' }
+    })
+    const guideTooltipStyle = computed(() => {
+      const r = state.pageGuide.rect
+      const width = Math.min(370, window.innerWidth - 24)
+      const left = Math.max(12, Math.min(r.left, window.innerWidth - width - 12))
+      let top = r.top + r.height + 14
+      if (top + 220 > window.innerHeight) top = Math.max(12, r.top - 220 - 14)
+      return { left: left + 'px', top: top + 'px', width: width + 'px' }
     })
 
     // ===== Sections (computed) =====
@@ -160,19 +191,38 @@ createApp({
       n => { if (n > 0) state.sectionExpanded.releasing = true },
     )
 
+    const batchSelection = computed(() => {
+      const selected = state.items.filter(i => state.selectedIds.includes(i.id) && (i.status === 'new' || i.status === 'pending'))
+      return {
+        count: selected.length,
+        newCount: selected.filter(i => i.status === 'new').length,
+        pendingCount: selected.filter(i => i.status === 'pending').length,
+      }
+    })
+
     const releasingProjects = computed(() => {
-      const set = new Map()
-      const releasing = state.items.filter(i => i.status === 'releasing')
-      releasing.forEach(item => {
-        if (item.projects) item.projects.forEach(p => { if (p.name && !set.has(p.name)) set.set(p.name, !!getProjectInfo(p.name)?.mr) })
-        if (item.syncBranches) item.syncBranches.forEach(sb => { if (sb.project && !set.has(sb.project)) set.set(sb.project, !!getProjectInfo(sb.project)?.mr) })
+      const names = new Set()
+      state.items.filter(i => i.status === 'releasing').forEach(item => {
+        if (item.projects) item.projects.forEach(p => { if (p.name) names.add(p.name) })
+        if (item.syncBranches) item.syncBranches.forEach(sb => { if (sb.project) names.add(sb.project) })
       })
-      return [...set.entries()].map(([name, hasMr]) => {
+      const daily = state.dailyBranchCheck.date === getTodayStr() ? state.dailyBranchCheck : null
+      return [...names].map(name => {
         const info = getProjectInfo(name)
-        const srcBranch = state.launchBranch || findItemTargetBranch(name) || 'master_launched'
-        return { name, url: hasMr && info ? buildMrUrl(info.mr, srcBranch, 'master') : null }
+        const hasMr = !!info?.mr
+        const srcBranch = getProjectLaunchBranch(name)
+        const check = daily?.projects?.[name]
+        return {
+          name, srcBranch,
+          url: hasMr ? buildMrUrl(info.mr, srcBranch, 'master') : null,
+          nbUrl: hasMr ? buildBranchUrl(info.mr, 'master') : null,
+          checkStatus: !daily?.started ? 'unchecked' : (check?.status || 'waiting'),
+          checkError: check?.error || '',
+        }
       })
     })
+
+    const dailyExistsCount = computed(() => releasingProjects.value.filter(p => p.checkStatus === 'exists').length)
 
     const filteredBranchList = computed(() => {
       const s = state.branchModal.search.toLowerCase()
@@ -209,13 +259,17 @@ createApp({
       return url + '?merge_request[source_branch]=' + encodeURIComponent(branchName) + '&merge_request[target_branch]=' + encodeURIComponent(target)
     }
 
-    function buildBranchUrl(mrBase, refBranch) {
-      if (!mrBase) return ''
-      const ref = refBranch || 'master'
+    function getDailyBranchName() {
       const now = new Date()
       const mm = String(now.getMonth() + 1).padStart(2, '0')
       const dd = String(now.getDate()).padStart(2, '0')
-      const branchName = 'master_' + mm + dd
+      return 'master_' + mm + dd
+    }
+
+    function buildBranchUrl(mrBase, refBranch) {
+      if (!mrBase) return ''
+      const ref = refBranch || 'master'
+      const branchName = getDailyBranchName()
       let url = mrBase.replace(/\/+$/, '')
       if (url.includes('/merge_requests')) url = url.replace(/\/merge_requests.*$/, '/branches/new')
       else url += '/-/branches/new'
@@ -235,6 +289,20 @@ createApp({
         if (item.targetBranches && item.targetBranches[projectName]) return item.targetBranches[projectName]
       }
       return null
+    }
+
+    function getProjectLaunchBranch(projectName, item) {
+      const itemTarget = (item?.targetBranches && item.targetBranches[projectName]) || findItemTargetBranch(projectName)
+      const daily = state.dailyBranchCheck
+      // 批量检测启动后，只有当前项目真实存在当日分支才切换到它；
+      // 其他项目不能被同名全局值带着走，否则前端也会错误使用 master_MMDD。
+      if (daily.date === getTodayStr() && daily.started) {
+        if (daily.projects[projectName]?.status === 'exists') return daily.branch
+        const fixedGlobal = /^master_\d{4}$/.test(daily.fallbackLaunchBranch || '') ? '' : daily.fallbackLaunchBranch
+        const fixedItemTarget = /^master_\d{4}$/.test(itemTarget || '') ? '' : itemTarget
+        return fixedGlobal || fixedItemTarget || 'master_launched'
+      }
+      return state.launchBranch || itemTarget || 'master_launched'
     }
 
     function getReleasedTargets() {
@@ -348,16 +416,53 @@ createApp({
     // 页面就是这个 git 仓库里的静态文件，「在项目目录里 git pull」等于更新应用。
     // 所以同事只需要点页头的版本号：有新版就拉、拉完刷新；引擎代码变了则提示重启服务。
 
+    function saveUpdateNotice() {
+      localStorage.setItem(LS_UPDATE_NOTICE, JSON.stringify({
+        date: getTodayStr(),
+        hasUpdate: !!state.appVersion.hasUpdate,
+        remoteLatest: state.appVersion.remoteLatest || null,
+        restartRequired: !!state.appVersion.restartRequired,
+        restartCommit: state.appVersion.restartCommit || '',
+        restartPreviousPid: state.appVersion.restartPreviousPid || 0,
+      }))
+    }
+
+    function loadUpdateNotice() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(LS_UPDATE_NOTICE))
+        if (!saved) return
+        // 重启提示跨日期保留；绿色更新提示只复用当天的检查结果，隔天仍重新查询。
+        if (saved.restartRequired) {
+          state.appVersion.restartRequired = true
+          state.appVersion.restartCommit = saved.restartCommit || ''
+          state.appVersion.restartPreviousPid = saved.restartPreviousPid || 0
+        }
+        if (saved.date === getTodayStr()) {
+          state.appVersion.hasUpdate = !!saved.hasUpdate
+          state.appVersion.remoteLatest = saved.remoteLatest || null
+        }
+      } catch {}
+    }
+
     async function loadAppVersion() {
       try {
         const res = await fetch(apiUrl('/api/version'))
         const data = await res.json()
         if (data.code) return
+        const restartPreviousPid = state.appVersion.restartPreviousPid
         state.appVersion = { ...state.appVersion, ...data, checkedAt: Date.now() }
+        // git pull 后旧进程也能读到新提交，只有 PID 变化才能证明引擎真的重启过。
+        if (state.appVersion.restartRequired && restartPreviousPid && data.pid && data.pid !== restartPreviousPid) {
+          state.appVersion.restartRequired = false
+          state.appVersion.restartCommit = ''
+          state.appVersion.restartPreviousPid = 0
+          state.appVersion.hasUpdate = false
+          saveUpdateNotice()
+        }
       } catch {}
     }
 
-    async function checkUpdate() {
+    async function checkUpdate(checkOnly = false) {
       if (state.updateBusy) return
       state.updateBusy = true
       try {
@@ -365,28 +470,51 @@ createApp({
         const d = await res.json()
         if (d.code) throw new Error(d.error || d.code)
         if (d.local) state.appVersion = { ...state.appVersion, ...d.local }
-        if (!d.configured) { toast(d.hint || '还没有配置远端仓库，无法检查更新'); return }
-        if (d.reachable === false) { toast(d.error || '拉取失败'); return }
+        if (!d.configured) { if (!checkOnly) toast(d.hint || '还没有配置远端仓库，无法检查更新'); return }
+        if (d.reachable === false) { if (!checkOnly) toast(d.error || '拉取失败'); return }
+        state.appVersion.hasUpdate = !!d.hasUpdate
+        state.appVersion.remoteLatest = d.remoteLatest || null
+        saveUpdateNotice()
         if (!d.hasUpdate) {
-          toast(`已是最新版本 ${d.local.commit}${d.dirty ? '（本地有未提交改动）' : ''}`)
+          if (!checkOnly) toast(`已是最新版本 ${d.local.commit}${d.dirty ? '（本地有未提交改动）' : ''}`)
           return
         }
-        // 点这一下就是为了拿到最新代码，所以直接拉，不再二次确认
+        // 自动检查只提示，不拉代码；用户点击绿色徽标才执行更新。
+        if (checkOnly) {
+          toast(`发现新版本 ${d.remoteLatest?.commit || ''}，点击右上角绿色「有更新」即可更新`)
+          return
+        }
         const r2 = await fetch(apiUrl('/api/update/apply'), { method: 'POST' })
         const d2 = await r2.json()
         if (d2.code) throw new Error(d2.error || d2.code)
-        state.appVersion = { ...state.appVersion, commit: d2.to, subject: d2.subject }
+        state.appVersion = { ...state.appVersion, commit: d2.to, subject: d2.subject, hasUpdate: false }
         if (d2.engineChanged) {
-          toast(`已更新到 ${d2.to}，但这次改动包含引擎代码：请关掉服务窗口、重跑 start-server.bat，再刷新页面`)
+          state.appVersion.restartRequired = true
+          state.appVersion.restartCommit = d2.to
+          state.appVersion.restartPreviousPid = state.appVersion.pid || 0
+          saveUpdateNotice()
+          toast(`已更新到 ${d2.to}，包含引擎改动：请重启 start-server.bat；重启前右上角会一直提示`)
           return
         }
+        state.appVersion.restartRequired = false
+        state.appVersion.restartCommit = ''
+        state.appVersion.restartPreviousPid = 0
+        saveUpdateNotice()
         toast(`已更新到 ${d2.to}，正在刷新页面...`)
         setTimeout(() => location.reload(), 1200)
       } catch (e) {
-        toast(`检查更新失败：${e.message}`)
+        if (!checkOnly) toast(`检查更新失败：${e.message}`)
       } finally {
         state.updateBusy = false
       }
+    }
+
+    function autoCheckUpdate() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(LS_UPDATE_NOTICE))
+        if (saved?.date === getTodayStr()) return
+      } catch {}
+      checkUpdate(true)
     }
 
     // ===== 备份到项目目录（引擎写盘）=====
@@ -626,6 +754,62 @@ createApp({
       if (item) delete state.editingIds[item.id]
     }
 
+    function toggleItemSelected(id) {
+      state.selectedIds = state.selectedIds.includes(id)
+        ? state.selectedIds.filter(selectedId => selectedId !== id)
+        : [...state.selectedIds, id]
+    }
+
+    function clearBatchSelection() { state.selectedIds = [] }
+
+    function batchSetPending() {
+      const selected = state.items.filter(i => state.selectedIds.includes(i.id) && i.status === 'new')
+      if (!selected.length) { toast('请先勾选新建需求'); return }
+      selected.forEach(item => { item.status = 'pending'; delete item.releaseTime })
+      state.selectedIds = []
+      saveToLocalStorage()
+      toast('已批量设为待发版（' + selected.length + ' 条）')
+    }
+
+    function completeBatchRelease(ids, targetBranches) {
+      const selected = state.items.filter(i => ids.includes(i.id) && i.status === 'pending')
+      if (!selected.length) { toast('所选需求已不在待发版状态'); return }
+      const releaseTime = formatReleaseTime()
+      selected.forEach(item => {
+        const names = new Set()
+        if (item.projects) item.projects.forEach(p => { if (p.name) names.add(p.name) })
+        if (item.syncBranches) item.syncBranches.forEach(sb => { if (sb.project) names.add(sb.project) })
+        const ownTargets = {}
+        names.forEach(name => { if (targetBranches[name]) ownTargets[name] = targetBranches[name] })
+        item.status = 'releasing'
+        item.releaseTime = releaseTime
+        item.targetBranches = ownTargets
+      })
+      state.selectedIds = []
+      saveToLocalStorage()
+      toast('已批量开始发版（' + selected.length + ' 条）')
+    }
+
+    function batchReleaseSelected() {
+      const selected = state.items.filter(i => state.selectedIds.includes(i.id) && i.status === 'pending')
+      if (!selected.length) { toast('请先勾选待发版需求'); return }
+      const ids = selected.map(i => i.id)
+      const targets = getReleasedTargets()
+      if (!state.launchBranch) {
+        const seen = new Set()
+        selected.forEach(item => {
+          if (item.projects) item.projects.forEach(p => { if (p.name && !targets[p.name]) seen.add(p.name) })
+          if (item.syncBranches) item.syncBranches.forEach(sb => { if (sb.project && !targets[sb.project]) seen.add(sb.project) })
+        })
+        const projects = [...seen].map(name => ({ name, target: '' }))
+        if (projects.length) {
+          state.launchDialog = { item: { _isBatch: true, ids }, label: '批量发版：' + selected.length + ' 条需求', projects }
+          return
+        }
+      }
+      completeBatchRelease(ids, targets)
+    }
+
     function changeStatus(item, newStatus) {
       if (newStatus === 'releasing') {
         item.releaseTime = formatReleaseTime()
@@ -635,6 +819,7 @@ createApp({
         delete item.releaseTime
       }
       item.status = newStatus
+      state.selectedIds = state.selectedIds.filter(id => id !== item.id)
       saveToLocalStorage()
       toast('已' + statusLabel(newStatus) + '：' + item.name)
     }
@@ -668,11 +853,7 @@ createApp({
       const item = state.launchDialog.item
       state.launchDialog.item = null
       if (item._isBatch) {
-        const pending = state.items.filter(i => i.status === 'pending')
-        const releaseTime = formatReleaseTime()
-        pending.forEach(i => { i.status = 'releasing'; i.releaseTime = releaseTime; i.targetBranches = targetBranches })
-        saveToLocalStorage()
-        toast('已全部开始发版（' + pending.length + ' 条）')
+        completeBatchRelease(item.ids || [], targetBranches)
       } else if (item) {
         item.targetBranches = targetBranches
         changeStatus(item, 'releasing')
@@ -688,6 +869,188 @@ createApp({
       toast('已全部完成发版（' + releasing.length + ' 条）')
     }
 
+    let dailyBranchTimer = null
+    let dailyCheckInFlight = false
+    let dailyCheckRunId = 0
+    let dailyCheckAbort = null
+
+    function saveDailyBranchCheck() {
+      localStorage.setItem(LS_DAILY_BRANCH_CHECK, JSON.stringify(state.dailyBranchCheck))
+    }
+
+    function ensureCurrentDailyBranchCheck() {
+      if (state.dailyBranchCheck.date === getTodayStr() && state.dailyBranchCheck.branch === getDailyBranchName()) return
+      state.dailyBranchCheck = {
+        date: getTodayStr(), branch: getDailyBranchName(), started: false, active: false,
+        checking: false, stopAt: 0, lastCheckedAt: '', fallbackLaunchBranch: '', projects: {}
+      }
+      clearInterval(dailyBranchTimer)
+      dailyBranchTimer = null
+      dailyCheckRunId++
+      if (dailyCheckAbort) dailyCheckAbort.abort()
+      dailyCheckAbort = null
+      dailyCheckInFlight = false
+      saveDailyBranchCheck()
+    }
+
+    function loadDailyBranchCheck() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(LS_DAILY_BRANCH_CHECK))
+        if (saved && saved.date === getTodayStr() && saved.branch === getDailyBranchName()) {
+          state.dailyBranchCheck = { ...state.dailyBranchCheck, ...saved, checking: false }
+          state.dailyBranchCheck.active = !!saved.active && saved.stopAt > Date.now()
+          Object.values(state.dailyBranchCheck.projects || {}).forEach(p => {
+            if (p.status === 'checking') p.status = 'waiting'
+          })
+        }
+      } catch {}
+      ensureCurrentDailyBranchCheck()
+    }
+
+    function dailyStatusLabel(status) {
+      return {
+        unchecked: '未检测', waiting: '等待检测', checking: '检测中',
+        exists: '已建立', missing: '未建立', error: '检测失败'
+      }[status] || '未检测'
+    }
+
+    function openBatchBranchDialog() {
+      ensureCurrentDailyBranchCheck()
+      const projects = releasingProjects.value.filter(p => p.nbUrl)
+      if (!projects.length) { toast('发版项目未配置可用的 MR 地址'); return }
+      state.batchBranchDialog = {
+        visible: true,
+        branch: getDailyBranchName(),
+        projects: projects.map(p => ({ name: p.name, nbUrl: p.nbUrl }))
+      }
+    }
+
+    async function openAllDailyBranchPages() {
+      const projects = [...state.batchBranchDialog.projects]
+      const blocked = []
+      // 先走普通浏览器入口；被拦截的交给本机引擎补开，不能让一次批量操作只打开第一个项目。
+      projects.forEach(p => { if (!window.open(p.nbUrl, '_blank')) blocked.push(p) })
+      state.batchBranchDialog.visible = false
+      startDailyBranchCheck()
+      let opened = projects.length - blocked.length
+      let failed = 0
+      await Promise.all(blocked.map(async p => {
+        try {
+          const res = await fetch(apiUrl('/api/system/open-external'), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: p.nbUrl })
+          })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok || data.code) throw new Error(data.error || '系统浏览器打开失败')
+          opened++
+        } catch { failed++ }
+      }))
+      if (failed) toast('已打开 ' + opened + ' 个页面，' + failed + ' 个补开失败，可在看板单独打开')
+      else toast(blocked.length ? '已打开全部 ' + projects.length + ' 个页面（系统浏览器补开 ' + blocked.length + ' 个）' : '已打开 ' + projects.length + ' 个新建分支页面')
+    }
+
+    function stopDailyBranchCheck() {
+      state.dailyBranchCheck.active = false
+      state.dailyBranchCheck.checking = false
+      // 停止不仅取消下一轮：当前请求也立即失效，旧序列不能再写看板或覆盖公共上线分支。
+      dailyCheckRunId++
+      if (dailyCheckAbort) dailyCheckAbort.abort()
+      dailyCheckAbort = null
+      dailyCheckInFlight = false
+      clearInterval(dailyBranchTimer)
+      dailyBranchTimer = null
+      saveDailyBranchCheck()
+    }
+
+    function scheduleDailyBranchCheck() {
+      clearInterval(dailyBranchTimer)
+      dailyBranchTimer = setInterval(() => {
+        if (!state.dailyBranchCheck.active || Date.now() >= state.dailyBranchCheck.stopAt) {
+          stopDailyBranchCheck()
+          return
+        }
+        runDailyBranchCheck()
+      }, 10000)
+    }
+
+    function startDailyBranchCheck() {
+      ensureCurrentDailyBranchCheck()
+      const daily = state.dailyBranchCheck
+      if (state.launchBranch !== daily.branch) daily.fallbackLaunchBranch = state.launchBranch
+      daily.started = true
+      daily.active = true
+      daily.stopAt = Date.now() + 10 * 60 * 1000
+      saveDailyBranchCheck()
+      scheduleDailyBranchCheck()
+      runDailyBranchCheck()
+    }
+
+    async function runDailyBranchCheck() {
+      ensureCurrentDailyBranchCheck()
+      const daily = state.dailyBranchCheck
+      if (dailyCheckInFlight || !daily.started) return
+      if (!releasingProjects.value.length) { stopDailyBranchCheck(); return }
+      const runId = ++dailyCheckRunId
+      const controller = new AbortController()
+      dailyCheckAbort = controller
+      dailyCheckInFlight = true
+      daily.checking = true
+      let detected = false
+      try {
+        // 已建立也必须重查：远端分支可能被删除，跳过旧成功项会把过期状态一直留在看板上。
+        const pending = releasingProjects.value
+        for (const project of pending) {
+          if (runId !== dailyCheckRunId || !daily.active) return
+          const info = getProjectInfo(project.name)
+          const repo = deriveRepoUrl(info?.mr)
+          const previous = daily.projects[project.name] || {}
+          if (!repo && !info?.localPath) {
+            daily.projects[project.name] = { status: 'error', error: '未配置仓库地址或本地路径', checkedAt: Date.now() }
+            continue
+          }
+          daily.projects[project.name] = { ...previous, status: 'checking', error: '' }
+          try {
+            const query = '?repo=' + encodeURIComponent(repo)
+              + '&path=' + encodeURIComponent(info.localPath || '')
+              + '&branch=' + encodeURIComponent(daily.branch)
+            const res = await fetch(apiUrl('/api/git/branch-exists') + query, { cache: 'no-store', signal: controller.signal })
+            const data = await res.json()
+            if (runId !== dailyCheckRunId || !daily.active) return
+            if (data.code) throw new Error(data.error || data.code)
+            daily.projects[project.name] = {
+              status: data.exists ? 'exists' : 'missing', error: '', checkedAt: Date.now()
+            }
+            if (data.exists) detected = true
+          } catch (e) {
+            if (runId !== dailyCheckRunId || !daily.active) return
+            daily.projects[project.name] = { status: 'error', error: e.message || '检测失败', checkedAt: Date.now() }
+          }
+          saveDailyBranchCheck()
+        }
+        if (runId !== dailyCheckRunId || !daily.active) return
+        daily.lastCheckedAt = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+        // 分支名由当天日期确定，任一仓库真实出现后就能确定公共值；
+        // 各项目是否已建立仍由看板独立表达，不能用公共值代替逐项目检测。
+        if (detected && state.launchBranch !== daily.branch) {
+          state.launchBranch = daily.branch
+          saveLaunchBranch()
+        }
+        if (releasingProjects.value.every(p => p.checkStatus === 'exists') || Date.now() >= daily.stopAt) {
+          stopDailyBranchCheck()
+        }
+      } finally {
+        if (runId === dailyCheckRunId) {
+          daily.checking = false
+          dailyCheckInFlight = false
+          dailyCheckAbort = null
+          saveDailyBranchCheck()
+        }
+      }
+    }
+
+    function handleDailyBranchFocus() {
+      if (state.dailyBranchCheck.started && state.dailyBranchCheck.active) runDailyBranchCheck()
+    }
+
     function showConfirm(item) { state.confirmDialog = { item } }
 
     function doDelete() {
@@ -695,6 +1058,7 @@ createApp({
       const item = state.confirmDialog.item
       const name = item.name
       state.items = state.items.filter(i => i !== item)
+      state.selectedIds = state.selectedIds.filter(id => id !== item.id)
       state.confirmDialog.item = null
       saveToLocalStorage()
       toast('已删除：' + name)
@@ -707,7 +1071,7 @@ createApp({
       const projectName = proj.name
       const branch = proj.branch
       const statusTarget = item.status === 'new' ? 'test' : item.status === 'pending' ? 'uat' : null
-      const target = statusTarget || state.launchBranch || (item.targetBranches && item.targetBranches[projectName]) || null
+      const target = statusTarget || getProjectLaunchBranch(projectName, item)
       const info = getProjectInfo(projectName)
       copyText(branch)
       if (info && info.mr) {
@@ -995,8 +1359,63 @@ createApp({
       dismissReminder()
     }
 
+    let guideScrollTimer = null
+    function updatePageGuideRect() {
+      if (!state.pageGuide.active) return
+      const step = currentGuideStep.value
+      const target = document.querySelector(step.selector) || (step.fallback && document.querySelector(step.fallback))
+      if (!target) return
+      const r = target.getBoundingClientRect()
+      const pad = 6
+      const left = Math.max(6, r.left - pad)
+      const top = Math.max(6, r.top - pad)
+      state.pageGuide.rect = {
+        left,
+        top,
+        width: Math.max(20, Math.min(r.width + pad * 2, window.innerWidth - left - 6)),
+        height: Math.max(20, Math.min(r.height + pad * 2, window.innerHeight - top - 6)),
+      }
+    }
+
+    function positionPageGuide() {
+      const step = currentGuideStep.value
+      const target = document.querySelector(step.selector) || (step.fallback && document.querySelector(step.fallback))
+      if (!target) return
+      updatePageGuideRect()
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      clearTimeout(guideScrollTimer)
+      guideScrollTimer = setTimeout(updatePageGuideRect, 350)
+    }
+
+    function startPageGuide() {
+      state.pageGuide.step = 0
+      state.pageGuide.active = true
+      nextTick(positionPageGuide)
+    }
+
+    function closePageGuide() {
+      state.pageGuide.active = false
+      clearTimeout(guideScrollTimer)
+    }
+
+    function nextPageGuide() {
+      if (state.pageGuide.step >= guideSteps.length - 1) { closePageGuide(); return }
+      state.pageGuide.step++
+      nextTick(positionPageGuide)
+    }
+
+    function prevPageGuide() {
+      if (state.pageGuide.step <= 0) return
+      state.pageGuide.step--
+      nextTick(positionPageGuide)
+    }
+
     // ===== Keyboard =====
     function handleKeydown(e) {
+      if (state.pageGuide.active) {
+        if (e.key === 'Escape') closePageGuide()
+        return
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); startAdding() }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); document.querySelector('.search-wrap input')?.focus() }
       if (e.key === 'Escape') {
@@ -1770,6 +2189,10 @@ createApp({
     // ===== Lifecycle =====
     document.addEventListener('keydown', handleKeydown)
     document.addEventListener('click', () => { if (state.ctxMenu.visible) closeCtxMenu() })
+    window.addEventListener('focus', handleDailyBranchFocus)
+    window.addEventListener('resize', updatePageGuideRect)
+    window.addEventListener('scroll', updatePageGuideRect, true)
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) handleDailyBranchFocus() })
 
     onMounted(async () => {
       // 端口必须在任何接口调用之前确定，否则会打到别的进程上（旧引擎不写端口文件，退回默认值）
@@ -1803,13 +2226,20 @@ createApp({
         state.launchBranch = localStorage.getItem('todo_launch_branch') || ''
       }
 
+      loadDailyBranchCheck()
+      if (state.dailyBranchCheck.active) {
+        scheduleDailyBranchCheck()
+        runDailyBranchCheck()
+      }
+
       // 卡片区的浏览状态（折叠 / 分组开合）要早点读：晚于首帧渲染会出现"先展开再折起"的闪动
       loadCardUiState()
       bindImpactPop()
 
       checkDailyReminder()
       autoFetchBranches()
-      loadAppVersion()
+      loadUpdateNotice()
+      loadAppVersion().finally(autoCheckUpdate)
     })
 
     async function loadFromJsonFile() {
@@ -2051,7 +2481,8 @@ createApp({
     // ===== Return everything exposed to template =====
     return {
       state,
-      sections, releasingProjects, filteredBranchList,
+      sections, releasingProjects, filteredBranchList, batchSelection, dailyExistsCount,
+      guideSteps, currentGuideStep, guideSpotlightStyle, guideTooltipStyle,
       escHtml, truncateBranch, selfWorkItemId, getProjectInfo, getColorIdx,
       buildMrUrl, buildBranchUrl, formatReleaseTime, newId,
       statusLabel, statusClass,
@@ -2060,6 +2491,10 @@ createApp({
       addProject, removeProject, saveProjectEdit,
       startAdding, saveAdding, startEdit, saveEdit, cancelEdit,
       changeStatus, releaseItem, confirmLaunch, releaseAllToDone,
+      toggleItemSelected, clearBatchSelection, batchSetPending, batchReleaseSelected,
+      openBatchBranchDialog, openAllDailyBranchPages, startDailyBranchCheck,
+      stopDailyBranchCheck, runDailyBranchCheck, dailyStatusLabel,
+      startPageGuide, closePageGuide, nextPageGuide, prevPageGuide,
       showConfirm, doDelete,
       clickBranch,
       openNoteDialog, openInlineNoteForEdit, closeNote, saveNote,
@@ -2086,6 +2521,10 @@ createApp({
       items: computed(() => state.items),
       projectNames: computed(() => state.projectNames),
       editingIds: computed(() => state.editingIds),
+      selectedIds: computed(() => state.selectedIds),
+      batchBranchDialog: computed(() => state.batchBranchDialog),
+      dailyBranchCheck: computed(() => state.dailyBranchCheck),
+      pageGuide: computed(() => state.pageGuide),
       addingItems: computed({ get: () => state.addingItems, set: v => { state.addingItems = v } }),
       pmExpanded: computed({ get: () => state.pmExpanded, set: v => { state.pmExpanded = v } }),
       editProjectIdx: computed({ get: () => state.editProjectIdx, set: v => { state.editProjectIdx = v } }),

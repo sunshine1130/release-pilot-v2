@@ -26,18 +26,34 @@
     </div>
   </div>
 
+  <!-- 页面 Guide：高亮真实页面控件，导览只读，不改需求或项目数据 -->
+  <div v-if="pageGuide.active" class="guide-overlay">
+    <div class="guide-spotlight" :style="guideSpotlightStyle"></div>
+    <div class="guide-tooltip" :style="guideTooltipStyle" role="dialog" aria-label="页面导览">
+      <div class="guide-kicker">页面 Guide · {{pageGuide.step + 1}} / {{guideSteps.length}}</div>
+      <h3>{{currentGuideStep.title}}</h3>
+      <p>{{currentGuideStep.text}}</p>
+      <div class="guide-tooltip-footer">
+        <button class="btn btn-ghost btn-sm" @click="closePageGuide">跳过</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-outline btn-sm" :disabled="pageGuide.step===0" @click="prevPageGuide">上一步</button>
+        <button class="btn btn-primary btn-sm" @click="nextPageGuide">{{pageGuide.step===guideSteps.length-1?'完成':'下一步'}}</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Header -->
   <div class="page-header">
     <div class="header-top">
-      <h1 class="page-title">需求发版管理<a href="./使用说明.html" target="_blank" class="help-icon" title="打开使用说明">?</a><span class="sub">共 {{items.length}} 条</span></h1>
+      <h1 class="page-title">需求发版管理<a href="./使用说明.html" target="_blank" class="help-icon" title="打开使用说明">?</a><button class="guide-entry" @click="startPageGuide">页面 Guide</button><span class="sub">共 {{items.length}} 条</span></h1>
       <div class="header-meta">
         <div class="port-note" v-if="portShifted"
              :title="'引擎实际运行在 ' + apiPort + ' 端口（默认 1949 被占用，通常是老版本引擎先起来了）。浏览器按「协议+主机+端口」隔离数据，换端口等于换一份数据 —— 如果这里需求和配置是空的，先关掉占用 1949 的程序再重启引擎，或改用原来的地址打开。'">
           引擎端口 {{apiPort}}（非默认）
         </div>
-        <button class="version-badge" :class="{busy:updateBusy}" :disabled="updateBusy" @click="checkUpdate"
-                :title="'当前版本 ' + (appVersion.commit||'?') + (appVersion.date ? '（' + appVersion.date + '）' : '') + (appVersion.subject ? '\n' + appVersion.subject : '') + '\n\n点击：检查 GitHub 上有没有新版本，有就直接拉取'">
-          {{updateBusy ? '更新中...' : 'v' + (appVersion.commit||'?')}}
+        <button class="version-badge" :class="{busy:updateBusy,'has-update':appVersion.hasUpdate,'restart-required':appVersion.restartRequired}" :disabled="updateBusy" @click="checkUpdate(false)"
+                :title="appVersion.restartRequired ? '新版本 ' + appVersion.restartCommit + ' 已下载且包含引擎改动，请重启 start-server.bat 后刷新页面' : appVersion.hasUpdate ? '发现新版本 ' + (appVersion.remoteLatest?.commit||'') + '，点击直接更新' : '当前版本 ' + (appVersion.commit||'?') + (appVersion.date ? '（' + appVersion.date + '）' : '') + (appVersion.subject ? '\n' + appVersion.subject : '') + '\n\n每天自动检查一次；也可以点击手动检查'">
+          {{updateBusy ? '更新中...' : appVersion.restartRequired ? '重启后生效' : appVersion.hasUpdate ? '有更新' : 'v' + (appVersion.commit||'?')}}
         </button>
       </div>
     </div>
@@ -203,7 +219,7 @@
 
   <!-- Requirement cards -->
   <template v-for="section in sections" :key="section.key">
-    <div class="section" :class="{collapsed:!section.expanded}">
+    <div class="section" :class="{collapsed:!section.expanded}" :data-section="section.key">
       <div class="section-header">
         <div class="collapse-header" @click="toggleSection(section.key)">
           <!-- 箭头直接切图标，不用 CSS 旋转 90°：旋转在两种状态下实测会渲染成同一方向 -->
@@ -219,10 +235,40 @@
           <button v-if="section.key==='releasing'&&section.items.length" class="btn btn-ghost btn-sm" @click.stop="releaseAllToDone">全部发版</button>
         </div>
         <span style="flex:1"></span>
-        <span v-if="section.key==='releasing'&&releasingProjects.length" style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
-          <span style="color:var(--text-muted)">发版项目：</span>
-          <span v-for="p in releasingProjects" :key="p.name" class="project-tag" :data-color="getColorIdx(p.name)" style="font-size:11px" :style="{cursor:p.url?'pointer':'default'}" @click="openMrUrl(p.url)" :title="p.url?'创建发版 MR → master':''">{{p.name}}</span>
-        </span>
+      </div>
+      <div class="batch-bar" v-if="section.key==='pending'&&!sortMode&&batchSelection.count">
+        <span>已选 <b>{{batchSelection.count}}</b> 条需求</span>
+        <button v-if="batchSelection.newCount" class="btn btn-warning btn-xs" @click="batchSetPending">批量设为待发版（{{batchSelection.newCount}}）</button>
+        <button v-if="batchSelection.pendingCount" class="btn btn-purple btn-xs" @click="batchReleaseSelected">批量开始发版（{{batchSelection.pendingCount}}）</button>
+        <button class="btn btn-outline btn-xs" @click="clearBatchSelection">取消选择</button>
+      </div>
+      <div class="daily-branch-board" v-if="section.key==='releasing'&&releasingProjects.length">
+        <div class="daily-board-header">
+          <div class="daily-board-title">
+            <strong>今日上线分支</strong>
+            <code>{{dailyBranchCheck.branch}}</code>
+            <span class="daily-board-summary">共 {{releasingProjects.length}} 个项目 · {{dailyBranchCheck.started ? '已建立 ' + dailyExistsCount + ' 个' : '尚未检测'}}</span>
+            <span class="daily-board-time">上次检测：{{dailyBranchCheck.lastCheckedAt || '—'}}</span>
+          </div>
+          <div class="daily-board-actions">
+            <button class="btn btn-purple btn-sm" @click="openBatchBranchDialog">批量建立当日上线分支</button>
+            <button class="btn btn-outline btn-sm" :disabled="dailyBranchCheck.checking" @click="startDailyBranchCheck">{{dailyBranchCheck.checking?'检测中...':'立即检测'}}</button>
+            <button v-if="dailyBranchCheck.active" class="btn btn-ghost btn-sm" @click="stopDailyBranchCheck">停止自动检测</button>
+          </div>
+        </div>
+        <div class="daily-project-list">
+          <div v-for="p in releasingProjects" :key="p.name" class="daily-project-row" :class="'is-'+p.checkStatus">
+            <span class="project-tag" :data-color="getColorIdx(p.name)">{{p.name}}</span>
+            <span class="daily-status" :title="p.checkError">{{dailyStatusLabel(p.checkStatus)}}</span>
+            <span class="daily-error" v-if="p.checkError">{{p.checkError}}</span>
+            <span class="daily-mr-source">MR 源分支：<code>{{p.srcBranch}}</code></span>
+            <span class="daily-row-actions">
+              <a v-if="p.checkStatus!=='exists'&&p.nbUrl" :href="p.nbUrl" target="_blank" class="btn btn-outline btn-xs">打开 NB</a>
+              <a v-if="p.url" :href="p.url" target="_blank" class="btn btn-purple btn-xs">打开 MR</a>
+            </span>
+          </div>
+        </div>
+        <div class="daily-board-hint">只有远端真实存在当日分支的项目才切换 MR 源分支；其他项目继续使用原上线分支。批量 NB 或立即检测启动 10 分钟自动检测，返回本页面会立即检测。</div>
       </div>
       <!-- 排序模式提示：只有「待发版」能排序，进去才出现拖拽手柄（见 .grip 样式） -->
       <div class="sort-bar" v-if="section.key==='pending'&&sortMode">
@@ -271,6 +317,9 @@
                :data-key="itemKey(item)" :data-status="item.status">
 
             <div class="req-head">
+              <label v-if="section.key==='pending'&&!sortMode&&!editingIds[item.id]" class="batch-check" title="选择需求进行批量操作" @click.stop>
+                <input type="checkbox" :checked="selectedIds.includes(item.id)" @change="toggleItemSelected(item.id)">
+              </label>
               <span v-if="section.key==='pending'&&sortMode" class="grip" draggable="true" title="拖动排序（仅排序模式）" @dragstart="onDragStart($event,item)">⠿</span>
               <button class="chev" :title="isItemCollapsed(item)?'展开':'折叠'" @click="toggleItemCollapse(item)">
                 <svg width="13" height="13" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -418,6 +467,26 @@
     <div class="confirm-btns">
       <button class="btn btn-outline btn-sm" @click="launchDialog.item=null">取消</button>
       <button class="btn btn-purple btn-sm" @click="confirmLaunch">确认发版</button>
+    </div>
+  </div>
+</div>
+
+<!-- 批量建立当日上线分支：只批量打开 GitLab 页面，真正创建仍由各项目页面人工确认 -->
+<div class="dialog-overlay" v-if="batchBranchDialog.visible" style="display:flex" @click.self="batchBranchDialog.visible=false">
+  <div class="confirm-box daily-branch-dialog">
+    <div class="confirm-icon">🌿</div>
+    <div class="confirm-title">批量建立当日上线分支</div>
+    <div class="confirm-msg">将基于 master 打开 {{batchBranchDialog.projects.length}} 个项目的新建分支页面，分支名统一为 <code>{{batchBranchDialog.branch}}</code></div>
+    <div class="daily-dialog-projects">
+      <div v-for="p in batchBranchDialog.projects" :key="p.name" class="daily-dialog-project">
+        <span class="project-tag" :data-color="getColorIdx(p.name)">{{p.name}}</span>
+        <code>{{batchBranchDialog.branch}}</code>
+        <a :href="p.nbUrl" target="_blank" class="btn btn-outline btn-xs" @click="startDailyBranchCheck">单独打开</a>
+      </div>
+    </div>
+    <div class="confirm-btns">
+      <button class="btn btn-outline btn-sm" @click="batchBranchDialog.visible=false">取消</button>
+      <button class="btn btn-purple btn-sm" @click="openAllDailyBranchPages">打开全部新建分支页面</button>
     </div>
   </div>
 </div>
